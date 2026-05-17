@@ -8,7 +8,24 @@
   let { project, onClose }: { project: Project; onClose: () => void } = $props();
 
   let tab = $state<"auto" | "emoji" | "image">(project.avatarType as "auto" | "emoji" | "image");
+  const live = $derived(projects.byId(project.id) ?? project);
   let confirmDelete = $state(false);
+  let editingName = $state(false);
+  let nameDraft = $state(project.name);
+  let nameEl: HTMLInputElement | undefined = $state();
+
+  function startRename() {
+    nameDraft = live.name;
+    editingName = true;
+    requestAnimationFrame(() => nameEl?.select());
+  }
+
+  async function commitName() {
+    if (!editingName) return;
+    editingName = false;
+    const name = nameDraft.trim();
+    if (name && name !== live.name) await projects.update(project.id, { name });
+  }
 
   async function remove() {
     busy = true;
@@ -73,8 +90,28 @@
   <div class="flex items-center gap-3">
     <ProjectAvatar project={preview} size={44} />
     <div class="min-w-0">
-      <p class="text-sm font-semibold truncate">{project.name}</p>
-      <p class="text-[11px] text-[var(--color-ink-3)]">Customize avatar</p>
+      {#if editingName}
+        <input
+          bind:this={nameEl}
+          bind:value={nameDraft}
+          onblur={commitName}
+          onkeydown={(e) => {
+            if (e.key === "Enter") commitName();
+            if (e.key === "Escape") editingName = false;
+          }}
+          class="w-full bg-transparent text-sm font-semibold outline-none border-b
+            border-[var(--color-accent)] pb-0.5 text-[var(--color-ink)]"
+        />
+      {:else}
+        <button
+          onclick={startRename}
+          class="block max-w-full truncate text-sm font-semibold text-left
+            hover:text-[var(--color-accent)] transition-colors"
+        >
+          {live.name}
+        </button>
+      {/if}
+      <p class="text-[11px] text-[var(--color-ink-3)]">Tap name to rename</p>
     </div>
   </div>
 
@@ -119,7 +156,7 @@
         class="flex-1 py-2.5 rounded-2xl bg-[var(--color-danger)] text-white text-[13px] font-medium
           active:scale-[0.98] transition-transform disabled:opacity-50"
       >
-        Delete “{project.name}”
+        Delete “{live.name}”
       </button>
       <button
         onclick={() => (confirmDelete = false)}
