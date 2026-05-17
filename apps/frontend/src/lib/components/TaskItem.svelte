@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Check, Trash2, Pencil, GripVertical, Copy } from "lucide-svelte";
   import type { Task } from "$lib/api";
+  import { stripTokens } from "$lib/tokens";
   import { dnd } from "$lib/dnd.svelte";
   import { notifySuccess, notifyWarning, tapLight, tapMedium } from "$lib/haptics";
   import TaskContent from "./TaskContent.svelte";
@@ -127,6 +128,19 @@
     action();
   }
 
+  let confirmDelete = $state(false);
+
+  function askDelete() {
+    menuOpen = false;
+    confirmDelete = true;
+  }
+
+  function doDelete() {
+    confirmDelete = false;
+    notifyWarning();
+    onDelete(task);
+  }
+
   let justToggled = $state(false);
   function handleToggle() {
     justToggled = true;
@@ -202,10 +216,7 @@
        menu; editing is tap-on-text everywhere, so no inline edit button. -->
   <div class="hidden pointer-fine:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
     <button
-      onclick={() => {
-        notifyWarning();
-        onDelete(task);
-      }}
+      onclick={askDelete}
       class="p-1.5 rounded-lg hover:bg-[var(--color-danger-glow)] transition-colors"
     >
       <Trash2 size={13} class="text-[var(--color-ink-3)] hover:text-[var(--color-danger)]" />
@@ -244,10 +255,7 @@
       Duplicate
     </button>
     <button
-      onclick={() => runMenu(() => {
-        notifyWarning();
-        onDelete(task);
-      })}
+      onclick={() => runMenu(askDelete)}
       class="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-light text-[var(--color-danger)]
         hover:bg-[var(--color-danger-glow)] transition-colors"
     >
@@ -255,5 +263,41 @@
       Delete
     </button>
   </div>
+  </div>
+{/if}
+
+{#if confirmDelete}
+  <div use:portal>
+    <button
+      aria-label="Cancel"
+      class="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm animate-fade-in"
+      onclick={() => (confirmDelete = false)}
+    ></button>
+    <div
+      class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[min(90vw,320px)]
+        p-5 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)]
+        shadow-2xl shadow-black/50 animate-scale-in"
+    >
+      <p class="text-sm font-semibold mb-1">Delete task?</p>
+      <p class="text-[13px] font-light text-[var(--color-ink-2)] mb-4 line-clamp-2">
+        {stripTokens(task.text)}
+      </p>
+      <div class="flex items-center gap-2">
+        <button
+          onclick={doDelete}
+          class="flex-1 py-2.5 rounded-2xl bg-[var(--color-danger)] text-white text-[13px] font-medium
+            active:scale-[0.98] transition-transform"
+        >
+          Delete
+        </button>
+        <button
+          onclick={() => (confirmDelete = false)}
+          class="px-4 py-2.5 rounded-2xl bg-[var(--color-surface)] text-[13px] font-medium
+            text-[var(--color-ink-2)]"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   </div>
 {/if}

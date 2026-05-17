@@ -38,8 +38,19 @@ export function notifyWarning() {
   else vibrate([30, 30, 30]);
 }
 
+/** Open a selection haptic session (call when a drag begins). */
+export function selectionStart() {
+  if (native) Haptics.selectionStart().catch(() => {});
+}
+
 /** Selection change — light flick used while dragging over slots. */
 export function selection() {
+  // On iOS this only fires feedback when a session was opened via selectionStart().
   if (native) Haptics.selectionChanged().catch(() => {});
-  else vibrate(5);
+  else vibrate(8);
+}
+
+/** Close the selection haptic session (call when a drag ends). */
+export function selectionEnd() {
+  if (native) Haptics.selectionEnd().catch(() => {});
 }

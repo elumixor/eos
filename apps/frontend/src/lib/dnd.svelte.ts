@@ -1,7 +1,7 @@
 // Pointer-based drag & drop shared state. Works for both touch (iOS) and mouse.
 // Lists register via `data-dnd-list="<id>"`, items via `data-dnd-item="<taskId>"`.
 
-import { selection, tapMedium } from "$lib/haptics";
+import { selection, selectionEnd, selectionStart, tapMedium } from "$lib/haptics";
 
 interface DropPayload {
   taskId: string;
