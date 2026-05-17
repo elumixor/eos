@@ -9,6 +9,7 @@ export default handler(
       avatarType: z.enum(["auto", "emoji", "image"]).optional(),
       emoji: z.string().nullable().optional(),
       image: z.string().nullable().optional(),
+      hue: z.number().int().min(0).max(360).nullable().optional(),
     },
   },
   async ({ body: { name, avatarType, emoji, image } }) => {

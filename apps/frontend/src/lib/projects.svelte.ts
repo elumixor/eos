@@ -31,7 +31,13 @@ class ProjectsStore {
 
   async update(
     id: string,
-    patch: { name?: string; avatarType?: "auto" | "emoji" | "image"; emoji?: string | null; image?: string | null },
+    patch: {
+      name?: string;
+      avatarType?: "auto" | "emoji" | "image";
+      emoji?: string | null;
+      image?: string | null;
+      hue?: number | null;
+    },
   ): Promise<Project> {
     const updated = await api.projects(id).$patch(patch);
     this.list = this.list.map((p) => (p.id === id ? updated : p));

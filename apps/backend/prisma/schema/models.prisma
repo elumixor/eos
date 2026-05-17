@@ -11,6 +11,7 @@ model Project {
   avatarType String   @default("auto") // auto | emoji | image
   emoji      String?
   image      String? // base64 data URL
+  hue        Int? // 0-360 override for the generated avatar
   tasks      Task[]
   createdAt  DateTime @default(now())
 }

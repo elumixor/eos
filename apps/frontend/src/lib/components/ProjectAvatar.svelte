@@ -22,5 +22,5 @@
     {project.emoji}
   </span>
 {:else}
-  <BoringAvatar name={project.name} {size} />
+  <BoringAvatar name={project.name} {size} hue={project.hue} />
 {/if}

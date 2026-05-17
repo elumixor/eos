@@ -13,7 +13,7 @@ export function avatarHtml(project: Project | undefined, name: string, size = 15
     return `<img src="${esc(project.image)}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;border-radius:9999px;object-fit:cover" alt="">`;
   if (project?.avatarType === "emoji" && project.emoji)
     return `<span class="pill-emoji" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.62)}px">${esc(project.emoji)}</span>`;
-  return marbleSvg(project?.name ?? name, size);
+  return marbleSvg(project?.name ?? name, size, project?.hue);
 }
 
 // Inner HTML (no wrapping span) for a token segment.

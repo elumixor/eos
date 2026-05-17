@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Shuffle, Smile, ImagePlus, Trash2 } from "lucide-svelte";
+  import { defaultHue } from "$lib/marble";
   import type { Project } from "$lib/api";
   import { projects } from "$lib/projects.svelte";
   import ProjectAvatar from "./ProjectAvatar.svelte";
@@ -38,6 +39,16 @@
 
   // Local preview copy so the avatar updates instantly.
   let preview = $state<Project>({ ...project });
+
+  let hueDraft = $state(project.hue ?? defaultHue(project.name));
+  let hueTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function setHue(v: number) {
+    hueDraft = v;
+    preview = { ...preview, avatarType: "auto", hue: v } as Project;
+    if (hueTimer) clearTimeout(hueTimer);
+    hueTimer = setTimeout(() => projects.update(project.id, { avatarType: "auto", hue: v }), 250);
+  }
 
   onMount(async () => {
     await import("emoji-picker-element");
@@ -133,6 +144,26 @@
     {/each}
   </div>
 
+  {#if tab === "auto"}
+    <div class="px-1">
+      <label
+        for="hue"
+        class="block text-[11px] uppercase tracking-wider text-[var(--color-ink-3)] mb-2"
+      >
+        Color
+      </label>
+      <input
+        id="hue"
+        type="range"
+        min="0"
+        max="360"
+        value={hueDraft}
+        oninput={(e) => setHue(Number(e.currentTarget.value))}
+        class="hue-slider w-full"
+      />
+    </div>
+  {/if}
+
   {#if tab === "emoji"}
     <div bind:this={pickerHost} class="rounded-2xl overflow-hidden"></div>
   {/if}
@@ -177,3 +208,42 @@
     </button>
   {/if}
 </div>
+
+<style>
+  .hue-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 14px;
+    border-radius: 999px;
+    outline: none;
+    background: linear-gradient(
+      to right,
+      oklch(65% 0.18 0),
+      oklch(65% 0.18 60),
+      oklch(65% 0.18 120),
+      oklch(65% 0.18 180),
+      oklch(65% 0.18 240),
+      oklch(65% 0.18 300),
+      oklch(65% 0.18 360)
+    );
+  }
+  .hue-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+  .hue-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+  }
+</style>
