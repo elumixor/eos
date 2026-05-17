@@ -17,7 +17,7 @@
 
 <span
   class="flex-1 text-[13px] font-light tracking-wide leading-relaxed cursor-text select-none
-    {dimmed ? 'line-through text-[var(--color-ink-3)]' : 'text-[var(--color-ink)]'}"
+    {dimmed ? 'line-through text-[var(--color-ink-3)] task-done' : 'text-[var(--color-ink)]'}"
 >
   {#each segments as seg, i (i)}
     {#if seg.kind === "text"}{seg.value}{:else if seg.kind === "project"}

@@ -238,6 +238,24 @@ html.light .pill-dur { color: oklch(45% 0.12 280); }
   line-height: 1;
 }
 
+/* Completed task: mute every chip to match the struck-through text. */
+.task-done .pill {
+  background: transparent;
+  color: var(--color-ink-3);
+  text-decoration: line-through;
+  font-weight: 400;
+  cursor: default;
+}
+.task-done .pill-project {
+  text-decoration-color: var(--color-ink-3);
+}
+.task-done .pill svg,
+.task-done .pill img,
+.task-done .pill .pill-emoji {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+
 /* ── @-mention rich input + picker ────────────────────────────── */
 .rich-input:empty::before {
   content: attr(data-placeholder);
