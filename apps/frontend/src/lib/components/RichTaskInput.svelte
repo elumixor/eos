@@ -82,8 +82,7 @@
     s?.addRange(r);
   }
 
-  function serialize(): string {
-    if (!editor) return "";
+  function canonical(root: Node): string {
     let out = "";
     const walk = (node: Node) => {
       for (const n of Array.from(node.childNodes)) {
@@ -95,8 +94,49 @@
         }
       }
     };
-    walk(editor);
-    return out.replace(/​/g, "").replace(/\s+/g, " ").trim();
+    walk(root);
+    return out.replace(/\s+/g, " ").trim();
+  }
+
+  function serialize(): string {
+    return editor ? canonical(editor) : "";
+  }
+
+  function selectionRange(): Range | null {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !editor) return null;
+    const r = sel.getRangeAt(0);
+    return editor.contains(r.commonAncestorContainer) ? r : null;
+  }
+
+  function onCopy(e: ClipboardEvent) {
+    const r = selectionRange();
+    if (!r) return;
+    const text = canonical(r.cloneContents());
+    if (!text) return;
+    e.preventDefault();
+    e.clipboardData?.setData("text/plain", text);
+  }
+
+  function onCut(e: ClipboardEvent) {
+    const r = selectionRange();
+    if (!r) return;
+    e.preventDefault();
+    e.clipboardData?.setData("text/plain", canonical(r.cloneContents()));
+    editor?.focus();
+    document.execCommand("delete");
+    onInput();
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!text) return;
+    e.preventDefault();
+    editor?.focus();
+    // Tokens (@project:/@time:/@dur:) become pills again; anything else is
+    // inserted as escaped plain text.
+    document.execCommand("insertHTML", false, renderEditorHtml(text, projects.list));
+    onInput();
   }
 
   function close() {
@@ -293,6 +333,9 @@
       focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300"
     oninput={onInput}
     onkeydown={onKeydown}
+    oncopy={onCopy}
+    oncut={onCut}
+    onpaste={onPaste}
     onblur={() =>
       setTimeout(() => {
         close();

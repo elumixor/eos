@@ -43,15 +43,9 @@ function tokenOf(seg: Segment): string {
   return `@time:${seg.hasTime ? `${base}T${pad(d.getHours())}:${pad(d.getMinutes())}` : base}`;
 }
 
-// Zero-width space — placed around pills so the caret always has a text
-// position next to a contenteditable=false pill (otherwise you can't put
-// the cursor before/after/between pills).
-export const ZWSP = "​";
-
-// Standalone pill element (for the contenteditable editor). Wrapped in ZWSP
-// so it is always individually addressable by the caret.
+// Standalone pill element (for the contenteditable editor).
 export function pillElement(seg: Segment): string {
-  return `${ZWSP}<span class="${pillClass(seg)}" contenteditable="false" data-token="${esc(tokenOf(seg))}" data-pill="${seg.kind}">${pillInner(seg)}</span>${ZWSP}`;
+  return `<span class="${pillClass(seg)}" contenteditable="false" data-token="${esc(tokenOf(seg))}" data-pill="${seg.kind}">${pillInner(seg)}</span>`;
 }
 
 // Full canonical text → editor HTML (pills + escaped text).

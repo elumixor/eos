@@ -205,8 +205,6 @@ html.dnd-dragging * {
   font-weight: 500;
   line-height: 1.45;
   white-space: nowrap;
-  user-select: none;
-  -webkit-user-select: none;
   cursor: pointer;
   transition: background 0.15s ease, filter 0.15s ease;
 }
