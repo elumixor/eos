@@ -4,7 +4,7 @@
   import { api, type Day, type Task } from "$lib/api";
   import { dnd } from "$lib/dnd.svelte";
   import { projects } from "$lib/projects.svelte";
-  import { extractFields } from "$lib/tokens";
+  import { extractFields, projectIds } from "$lib/tokens";
   import DayCard from "$lib/components/DayCard.svelte";
   import WeekCard from "$lib/components/WeekCard.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
@@ -23,7 +23,7 @@
   const todayDay = $derived(days.find((d) => d.date === today));
   // Local-only project filter: when set, only that project's tasks show.
   const matchesFilter = (t: Task) =>
-    !projects.filterId || t.projectId === projects.filterId;
+    !projects.filterId || projectIds(t.text).includes(projects.filterId);
 
   const weekTasks = $derived(
     days

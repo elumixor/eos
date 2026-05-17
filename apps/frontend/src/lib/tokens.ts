@@ -72,6 +72,13 @@ export function extractFields(text: string): {
   return { projectId, startTime, duration };
 }
 
+// Every project id referenced in the text (a task can have several).
+export function projectIds(text: string): string[] {
+  const ids: string[] = [];
+  for (const m of text.matchAll(TOKEN_RE)) if (m[1] === "project") ids.push(m[2]);
+  return ids;
+}
+
 // Plain text with all tokens stripped (used for voice / fallbacks).
 export function stripTokens(text: string): string {
   return text.replace(TOKEN_RE, "").replace(/\s+/g, " ").trim();

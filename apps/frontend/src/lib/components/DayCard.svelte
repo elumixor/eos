@@ -2,6 +2,7 @@
   import { Plus, ChevronDown, ChevronUp } from "lucide-svelte";
   import type { Day, Task } from "$lib/api";
   import { projects } from "$lib/projects.svelte";
+  import { projectIds } from "$lib/tokens";
   import TaskList from "./TaskList.svelte";
   import RichTaskInput from "./RichTaskInput.svelte";
 
@@ -35,7 +36,8 @@
     day.tasks
       .filter(
         (t) =>
-          !t.thisWeek && (!projects.filterId || t.projectId === projects.filterId),
+          !t.thisWeek &&
+          (!projects.filterId || projectIds(t.text).includes(projects.filterId)),
       )
       .sort((a, b) => a.order - b.order),
   );
