@@ -1,7 +1,14 @@
-model Day {
+model Section {
   id        String   @id @default(cuid())
-  date      String   @unique // YYYY-MM-DD format
-  tasks     Task[]
+  name      String
+  rangeKind String // calendar | relative | absolute
+  unit      String? // day | week | month | year  (calendar/relative)
+  count     Int? // relative: N units
+  offset    Int      @default(0) // calendar: 0=this, 1=next, -1=last
+  startDate String? // absolute YYYY-MM-DD
+  endDate   String? // absolute YYYY-MM-DD
+  order     Int      @default(0)
+  collapsed Boolean  @default(false)
   createdAt DateTime @default(now())
 }
 
@@ -12,6 +19,9 @@ model Project {
   emoji      String?
   image      String? // base64 data URL
   hue        Int? // 0-360 override for the generated avatar
+  parentId   String?
+  parent     Project?  @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Project[] @relation("ProjectTree")
   tasks      Task[]
   createdAt  DateTime @default(now())
 }
@@ -21,9 +31,7 @@ model Task {
   text      String
   completed Boolean   @default(false)
   order     Int       @default(0)
-  thisWeek  Boolean   @default(false)
-  day       Day       @relation(fields: [dayId], references: [id], onDelete: Cascade)
-  dayId     String
+  date      String? // YYYY-MM-DD effective scheduled date; null = unscheduled
   project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   projectId String?
   startTime DateTime?

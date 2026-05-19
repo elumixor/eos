@@ -9,18 +9,17 @@ export default handler(
         z.object({
           id: z.string().min(1),
           order: z.number(),
-          thisWeek: z.boolean(),
-          dayId: z.string().min(1),
+          date: z.string().nullable(),
         }),
       ),
     },
   },
   async ({ body: { items } }) => {
     await prisma.$transaction(
-      items.map(({ id, order, thisWeek, dayId }) =>
+      items.map(({ id, order, date }) =>
         prisma.task.update({
           where: { id },
-          data: { order, thisWeek, dayId },
+          data: { order, date },
         }),
       ),
     );

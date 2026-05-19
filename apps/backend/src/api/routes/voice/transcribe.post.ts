@@ -9,15 +9,9 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function getOrCreateToday() {
-  const date = todayDate();
-  return (await prisma.day.findUnique({ where: { date } })) ?? (await prisma.day.create({ data: { date } }));
-}
-
-function allDays() {
-  return prisma.day.findMany({
-    include: { tasks: { orderBy: { order: "asc" } } },
-    orderBy: { date: "desc" },
+function allTasks() {
+  return prisma.task.findMany({
+    orderBy: [{ date: "asc" }, { order: "asc" }],
   });
 }
 
@@ -25,7 +19,6 @@ interface Action {
   op: "create" | "complete" | "uncomplete" | "delete" | "edit";
   id?: string;
   text?: string;
-  thisWeek?: boolean;
 }
 
 export default handler(async ({ event }) => {
@@ -59,23 +52,22 @@ export default handler(async ({ event }) => {
   const language = transcription.language?.trim() || "the language the user spoke";
 
   if (!spoken) {
-    return { transcription: "", message: null, days: await allDays() };
+    return { transcription: "", message: null, tasks: await allTasks() };
   }
 
   // 2. Give the model the current task lists (with ids) so it can act on
   //    them, then ask it for a list of mutations to apply.
-  const today = await getOrCreateToday();
-  const days = await allDays();
-  const flat = days.flatMap((d) => d.tasks);
-  const weekTasks = flat.filter((t) => t.thisWeek);
-  const todayTasks = flat.filter((t) => t.dayId === today.id && !t.thisWeek);
+  const today = todayDate();
+  const flat = await allTasks();
+  const todayTasks = flat.filter((t) => t.date === today);
+  const unscheduledTasks = flat.filter((t) => t.date === null);
 
   const fmt = (t: { id: string; text: string; completed: boolean }) =>
     `- [${t.completed ? "x" : " "}] (id: ${t.id}) ${t.text}`;
 
   const context = [
     `Today's tasks:\n${todayTasks.map(fmt).join("\n") || "(none)"}`,
-    `This week's tasks:\n${weekTasks.map(fmt).join("\n") || "(none)"}`,
+    `Unscheduled tasks:\n${unscheduledTasks.map(fmt).join("\n") || "(none)"}`,
   ].join("\n\n");
 
   const systemPrompt = `You are the assistant for Eos, a daily to-do app.
@@ -84,7 +76,7 @@ Decide what changes to make to their task lists and respond with JSON only:
 
 {
   "actions": [
-    { "op": "create", "text": "string", "thisWeek": false },
+    { "op": "create", "text": "string" },
     { "op": "complete", "id": "existing task id" },
     { "op": "uncomplete", "id": "existing task id" },
     { "op": "edit", "id": "existing task id", "text": "new text" },
@@ -95,8 +87,8 @@ Decide what changes to make to their task lists and respond with JSON only:
 
 Rules:
 - Only reference existing tasks by the exact id shown in the context.
-- New tasks default to today; set "thisWeek": true only if the user is
-  clearly planning their week.
+- New tasks are scheduled for today. To schedule for another day, include
+  an "@time:YYYY-MM-DD" token in the text (optionally "@time:YYYY-MM-DDTHH:MM").
 - A single utterance can map to multiple actions (e.g. add three tasks).
 - If the request is ambiguous or you cannot map it to any action, return
   "actions": [] and put a short clarifying question in "message".
@@ -141,16 +133,14 @@ ${context}`;
   //    hallucination can't blow up the request.
   for (const a of actions) {
     if (a.op === "create" && a.text?.trim()) {
-      const dayId = today.id;
       const maxOrder = await prisma.task.aggregate({
-        where: { dayId },
+        where: { date: today },
         _max: { order: true },
       });
       await prisma.task.create({
         data: {
           text: a.text.trim(),
-          dayId,
-          thisWeek: a.thisWeek === true,
+          date: today,
           order: (maxOrder._max.order ?? -1) + 1,
         },
       });
@@ -169,5 +159,5 @@ ${context}`;
 
   const message = typeof parsed.message === "string" && parsed.message.trim() ? parsed.message.trim() : null;
 
-  return { transcription: spoken, message, days: await allDays() };
+  return { transcription: spoken, message, tasks: await allTasks() };
 });

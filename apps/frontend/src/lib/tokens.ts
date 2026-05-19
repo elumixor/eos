@@ -1,4 +1,4 @@
-import type { Project } from "$lib/api";
+import type { Project, Section, Task } from "$lib/api";
 
 // ── Canonical token format stored inside Task.text ──────────────
 //   @project:<cuid>          → project pill
@@ -280,4 +280,142 @@ export function suggestTokens(query: string, now = new Date()): Suggestion[] {
   }
 
   return out.sort((a, b) => b.score - a.score);
+}
+
+// ── Effective date & section ranges ─────────────────────────────
+const TIME_RE = /@time:([0-9T:-]+)/g;
+
+// Date part (YYYY-MM-DD) of the last @time token in the text, or null.
+export function explicitDate(text: string): string | null {
+  let iso: string | null = null;
+  for (const m of text.matchAll(TIME_RE)) {
+    const p = parseISO(m[1]);
+    if (p) iso = localISO(p.date, false);
+  }
+  return iso;
+}
+
+// The date a task belongs to: explicit @time chip wins, else the stored
+// implicit `date`, else null (unscheduled).
+export function effectiveDate(task: Pick<Task, "text" | "date">): string | null {
+  return explicitDate(task.text) ?? task.date ?? null;
+}
+
+// Insert / rewrite / remove the single @time token. When only the date
+// changes and the old token had a time-of-day, that time is preserved.
+export function setTaskDate(text: string, dateStr: string | null): string {
+  let oldTime: string | null = null;
+  for (const m of text.matchAll(TIME_RE)) {
+    const p = parseISO(m[1]);
+    if (p?.hasTime) oldTime = `${pad(p.date.getHours())}:${pad(p.date.getMinutes())}`;
+    else oldTime = null;
+  }
+  const stripped = text
+    .replace(TIME_RE, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (dateStr === null) return stripped;
+  const token = oldTime ? `@time:${dateStr}T${oldTime}` : `@time:${dateStr}`;
+  return stripped ? `${stripped} ${token}` : token;
+}
+
+// ── Date math (all on local YYYY-MM-DD strings) ─────────────────
+function todayISO(now = new Date()): string {
+  return localISO(now, false);
+}
+
+function fromISO(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function addDays(s: string, n: number): string {
+  const d = fromISO(s);
+  d.setDate(d.getDate() + n);
+  return localISO(d, false);
+}
+
+function addUnit(s: string, unit: string, n: number): string {
+  const d = fromISO(s);
+  if (unit === "day") d.setDate(d.getDate() + n);
+  else if (unit === "week") d.setDate(d.getDate() + n * 7);
+  else if (unit === "month") d.setMonth(d.getMonth() + n);
+  else if (unit === "year") d.setFullYear(d.getFullYear() + n);
+  return localISO(d, false);
+}
+
+// Inclusive [start, end] for a section, resolved relative to `now`.
+export function resolveRange(
+  section: Pick<Section, "rangeKind" | "unit" | "count" | "offset" | "startDate" | "endDate">,
+  now = new Date(),
+): { start: string; end: string } {
+  const today = todayISO(now);
+
+  if (section.rangeKind === "absolute") {
+    return { start: section.startDate ?? today, end: section.endDate ?? section.startDate ?? today };
+  }
+
+  if (section.rangeKind === "relative") {
+    const unit = section.unit ?? "day";
+    const count = Math.max(1, section.count ?? 1);
+    return { start: today, end: addDays(addUnit(today, unit, count), -1) };
+  }
+
+  // calendar: this/next/last week|month|year (offset units away)
+  const unit = section.unit ?? "week";
+  const off = section.offset ?? 0;
+  const d = fromISO(today);
+  if (unit === "day") {
+    const day = addDays(today, off);
+    return { start: day, end: day };
+  }
+  if (unit === "week") {
+    const toMon = (d.getDay() + 6) % 7;
+    const start = addDays(addDays(today, -toMon), off * 7);
+    return { start, end: addDays(start, 6) };
+  }
+  if (unit === "month") {
+    const s = new Date(d.getFullYear(), d.getMonth() + off, 1);
+    const e = new Date(d.getFullYear(), d.getMonth() + off + 1, 0);
+    return { start: localISO(s, false), end: localISO(e, false) };
+  }
+  // year
+  const s = new Date(d.getFullYear() + off, 0, 1);
+  const e = new Date(d.getFullYear() + off, 11, 31);
+  return { start: localISO(s, false), end: localISO(e, false) };
+}
+
+export function inRange(dateStr: string, r: { start: string; end: string }): boolean {
+  return dateStr >= r.start && dateStr <= r.end;
+}
+
+type RangeSpec = {
+  rangeKind: "calendar" | "relative" | "absolute";
+  unit?: "day" | "week" | "month" | "year" | null;
+  count?: number | null;
+  offset?: number;
+};
+
+// Free-text presets used by the section editor:
+//   "this week", "next month", "last year", "next 3 weeks", "next 5 days"
+export function parseRangeQuery(input: string): RangeSpec | null {
+  const q = input.trim().toLowerCase();
+  const units = ["day", "week", "month", "year"] as const;
+  const unitOf = (w: string) => units.find((u) => w === u || w === `${u}s`) ?? null;
+
+  let m = q.match(/^(this|next|last)\s+(day|week|month|year)s?$/);
+  if (m) {
+    const unit = m[2] as RangeSpec["unit"];
+    const offset = m[1] === "this" ? 0 : m[1] === "next" ? 1 : -1;
+    return { rangeKind: "calendar", unit, offset };
+  }
+  if (q === "today") return { rangeKind: "calendar", unit: "day", offset: 0 };
+  if (q === "tomorrow") return { rangeKind: "calendar", unit: "day", offset: 1 };
+
+  m = q.match(/^next\s+(\d+)\s+(day|week|month|year)s?$/);
+  if (m) {
+    const unit = unitOf(m[2]);
+    if (unit) return { rangeKind: "relative", unit, count: Number(m[1]) };
+  }
+  return null;
 }

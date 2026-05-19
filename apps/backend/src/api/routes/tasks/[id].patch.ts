@@ -8,7 +8,7 @@ export default handler(
       text: z.string().min(1).optional(),
       completed: z.boolean().optional(),
       order: z.number().optional(),
-      thisWeek: z.boolean().optional(),
+      date: z.string().nullable().optional(),
       projectId: z.string().nullable().optional(),
       startTime: z.string().nullable().optional(),
       duration: z.number().nullable().optional(),
