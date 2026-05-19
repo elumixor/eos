@@ -82,6 +82,9 @@ html {
   color: var(--color-ink);
   -webkit-tap-highlight-color: transparent;
   -webkit-text-size-adjust: 100%;
+  /* Kill the trackpad two-finger back/forward navigation so horizontal
+     swipes over task rows act on the row, not the browser history. */
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -218,6 +221,13 @@ html.dnd-dragging * {
   font-weight: 600;
 }
 .pill-project:hover { filter: brightness(1.15); }
+.pill-muted {
+  background: var(--color-surface-3);
+  color: var(--color-ink-3);
+  text-decoration: none;
+  font-weight: 500;
+  opacity: 0.85;
+}
 .pill-time {
   background: oklch(72% 0.16 35 / 0.14);
   color: var(--color-voice);
@@ -237,6 +247,14 @@ html.light .pill-dur { color: oklch(45% 0.12 280); }
 }
 html.light .pill-place { color: oklch(42% 0.13 155); }
 .pill-place:hover { filter: brightness(1.15); }
+.pill-link {
+  background: oklch(72% 0.14 235 / 0.16);
+  color: oklch(78% 0.11 235);
+  padding-left: 7px;
+  text-decoration: none;
+}
+html.light .pill-link { color: oklch(42% 0.14 235); }
+.pill-link:hover { filter: brightness(1.15); }
 .pill-emoji {
   display: inline-flex;
   align-items: center;

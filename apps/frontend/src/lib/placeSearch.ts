@@ -63,7 +63,13 @@ export function placeToken(p: Pick<Place, "name" | "lat" | "lng">): string {
   return `@place:${encodeURIComponent(p.name)}|${p.lat},${p.lng}`;
 }
 
-// Google Maps URL that opens the picked spot.
+// URL that opens the picked spot in the user's default maps app.
+//   iOS  → maps.apple.com (Apple Maps universal link)
+//   else → Google Maps
 export function placeUrl(name: string, lat: number, lng: number): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}&query_place_id=&center=${lat},${lng}`;
+  const q = encodeURIComponent(name);
+  const isIOS =
+    typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  if (isIOS) return `https://maps.apple.com/?q=${q}&ll=${lat},${lng}`;
+  return `https://www.google.com/maps/search/?api=1&query=${q}&center=${lat},${lng}`;
 }

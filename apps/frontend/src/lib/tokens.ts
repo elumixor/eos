@@ -6,14 +6,16 @@ import type { Project, Section, Task } from "$lib/api";
 //   @time:YYYY-MM-DDTHH:MM               → datetime pill
 //   @dur:<minutes>                       → duration pill
 //   @place:<urlEncodedName>|<lat>,<lng>  → Google Maps place pill
-export const TOKEN_RE = /@(project|time|dur|place):([^\s@]+)/g;
+//   @link:<urlEncodedUrl>                → external URL pill
+export const TOKEN_RE = /@(project|time|dur|place|link):([^\s@]+)/g;
 
 export type Segment =
   | { kind: "text"; value: string }
   | { kind: "project"; id: string; project: Project | undefined }
   | { kind: "time"; date: Date; hasTime: boolean }
   | { kind: "dur"; minutes: number }
-  | { kind: "place"; name: string; lat: number; lng: number };
+  | { kind: "place"; name: string; lat: number; lng: number }
+  | { kind: "link"; url: string };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -43,6 +45,12 @@ export function parseSegments(text: string, projects: Project[]): Segment[] {
       segs.push({ kind: "project", id: value, project: projects.find((p) => p.id === value) });
     } else if (type === "dur") {
       segs.push({ kind: "dur", minutes: Number(value) });
+    } else if (type === "link") {
+      try {
+        segs.push({ kind: "link", url: decodeURIComponent(value) });
+      } catch {
+        segs.push({ kind: "text", value: full });
+      }
     } else if (type === "place") {
       const pm = value.match(/^([^|]+)\|(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
       if (pm) {
@@ -110,15 +118,50 @@ export function fmtTime(d: Date): string {
   return m ? `${h}:${pad(m)} ${ap}` : `${h} ${ap}`;
 }
 
-export function fmtDateTime(d: Date, hasTime: boolean): string {
+export function fmtDateTime(d: Date, hasTime: boolean, atSentenceStart = true): string {
   const now = new Date();
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
   let day: string;
-  if (sameDay(d, now)) day = "Today";
-  else if (sameDay(d, tomorrow)) day = "Tomorrow";
+  if (sameDay(d, now)) day = atSentenceStart ? "Today" : "today";
+  else if (sameDay(d, tomorrow)) day = atSentenceStart ? "Tomorrow" : "tomorrow";
   else day = `${MONTHS[d.getMonth()]} ${d.getDate()}`;
   return hasTime ? `${day}, ${fmtTime(d)}` : day;
+}
+
+// ── Link helpers ────────────────────────────────────────────────
+// A typed query looks like a URL if it has a scheme or a "host.tld[/...]".
+// TLD is loose (2+ letters) so we don't ship a public-suffix list.
+// Host must end in an alphabetic TLD (≥2 letters) so "1.2.3" / "v1.2" don't
+// masquerade as links.
+const URL_LIKE_RE = /^(?:https?:\/\/\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:\/\S*)?)$/i;
+
+export function isUrlLike(q: string): boolean {
+  return URL_LIKE_RE.test(q.trim());
+}
+
+// Add https:// when the user typed a bare host or host/path.
+export function normalizeUrl(typed: string): string {
+  const t = typed.trim();
+  if (/^https?:\/\//i.test(t)) return t;
+  return `https://${t}`;
+}
+
+// Pretty label: drop scheme + leading "www.", drop the host's final TLD
+// segment, then append " / <last path segment>" if there's a path.
+//   atmagaming.com                  → "atmagaming"
+//   github.com/elumixor/eos         → "github / eos"
+//   https://x.com/elumixor/status/1 → "x / 1"
+export function fmtLinkLabel(url: string): string {
+  let s = url.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+  const slash = s.indexOf("/");
+  let host = slash >= 0 ? s.slice(0, slash) : s;
+  const path = slash >= 0 ? s.slice(slash + 1).replace(/\/+$/, "") : "";
+  const dot = host.lastIndexOf(".");
+  if (dot > 0) host = host.slice(0, dot);
+  if (!path) return host;
+  const tail = path.split("/").filter(Boolean).pop() ?? "";
+  return tail ? `${host} / ${tail}` : host;
 }
 
 export function fmtDuration(min: number): string {
