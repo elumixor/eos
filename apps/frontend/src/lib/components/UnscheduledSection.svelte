@@ -9,12 +9,16 @@
     onDeleteTask,
     onEditTask,
     onDuplicateTask,
+    onBulkDelete,
+    onBulkComplete,
   }: {
     tasks: Task[];
     onToggleTask: (task: Task) => void;
     onDeleteTask: (task: Task) => void;
     onEditTask: (task: Task, text: string) => void;
     onDuplicateTask: (task: Task) => void;
+    onBulkDelete: (ids: string[]) => void;
+    onBulkComplete: (ids: string[], completed: boolean) => void;
   } = $props();
 
   const ordered = $derived(tasks.slice().sort((a, b) => a.order - b.order));
@@ -36,5 +40,7 @@
     {onDeleteTask}
     {onEditTask}
     {onDuplicateTask}
+    {onBulkDelete}
+    {onBulkComplete}
   />
 </SectionShell>

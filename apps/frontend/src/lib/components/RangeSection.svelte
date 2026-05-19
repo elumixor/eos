@@ -9,19 +9,25 @@
   let {
     section,
     tasks,
+    excludeDate,
     onEditSection,
     onToggleTask,
     onDeleteTask,
     onEditTask,
     onDuplicateTask,
+    onBulkDelete,
+    onBulkComplete,
   }: {
     section: Section;
     tasks: Task[];
+    excludeDate?: string | null;
     onEditSection: (section: Section) => void;
     onToggleTask: (task: Task) => void;
     onDeleteTask: (task: Task) => void;
     onEditTask: (task: Task, text: string) => void;
     onDuplicateTask: (task: Task) => void;
+    onBulkDelete: (ids: string[]) => void;
+    onBulkComplete: (ids: string[], completed: boolean) => void;
   } = $props();
 
   const range = $derived(resolveRange(section));
@@ -29,7 +35,11 @@
     tasks
       .filter((t) => {
         const d = effectiveDate(t);
-        return d !== null && inRange(d, range);
+        if (d === null || !inRange(d, range)) return false;
+        // Model B: a task already visible in the Daily section for the
+        // selected date should not also appear in any range section.
+        if (excludeDate && d === excludeDate) return false;
+        return true;
       })
       .sort((a, b) => {
         const da = effectiveDate(a) ?? "";
@@ -70,5 +80,7 @@
     {onDeleteTask}
     {onEditTask}
     {onDuplicateTask}
+    {onBulkDelete}
+    {onBulkComplete}
   />
 </SectionShell>

@@ -1,31 +1,31 @@
 <script lang="ts">
-  import { Plus, CalendarDays, ChevronLeft, ChevronRight } from "lucide-svelte";
+  import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-svelte";
   import type { Task } from "$lib/api";
   import { dnd } from "$lib/dnd.svelte";
   import { localISO } from "$lib/tokens";
   import SectionShell from "./SectionShell.svelte";
   import TaskList from "./TaskList.svelte";
-  import RichTaskInput from "./RichTaskInput.svelte";
 
   let {
     tasks,
     selectedDate = $bindable(),
-    onAddTask,
     onToggleTask,
     onDeleteTask,
     onEditTask,
     onDuplicateTask,
+    onBulkDelete,
+    onBulkComplete,
   }: {
     tasks: Task[];
     selectedDate: string;
-    onAddTask: (date: string, text: string) => void;
     onToggleTask: (task: Task) => void;
     onDeleteTask: (task: Task) => void;
     onEditTask: (task: Task, text: string) => void;
     onDuplicateTask: (task: Task) => void;
+    onBulkDelete: (ids: string[]) => void;
+    onBulkComplete: (ids: string[], completed: boolean) => void;
   } = $props();
 
-  let addInput: RichTaskInput | undefined = $state();
   let dateInput: HTMLInputElement | undefined = $state();
   let collapsed = $state(false);
 
@@ -48,16 +48,13 @@
 
   const completedCount = $derived(tasks.filter((t) => t.completed).length);
 
-  function submitNew(text: string) {
-    onAddTask(selectedDate, text);
-    addInput?.clear();
-  }
-
   // Horizontal swipe on the header switches days (touch + mouse).
   let swipeX = 0;
   let swiping = false;
   function onPointerDown(e: PointerEvent) {
-    if (dnd.active) return;
+    // Mouse users page the day with the chevrons; the swipe gesture is for
+    // touch only (and would otherwise compete with marquee box-selection).
+    if (dnd.active || e.pointerType !== "touch") return;
     swipeX = e.clientX;
     swiping = true;
   }
@@ -141,24 +138,8 @@
       {onDeleteTask}
       {onEditTask}
       {onDuplicateTask}
+      {onBulkDelete}
+      {onBulkComplete}
     />
-
-    <div class="flex gap-2 mt-3 items-start">
-      <RichTaskInput
-        bind:this={addInput}
-        placeholder="What needs doing?  (@ for project, date, duration)"
-        onsubmit={submitNew}
-      />
-      <button
-        type="button"
-        onclick={() => addInput?.submit()}
-        aria-label="Add task"
-        class="w-11 h-[46px] rounded-2xl bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]
-          flex items-center justify-center transition-all duration-300 shrink-0
-          hover:shadow-lg hover:shadow-[var(--color-accent-glow)] active:scale-95"
-      >
-        <Plus size={18} strokeWidth={2.5} class="text-[var(--color-bg)]" />
-      </button>
-    </div>
   </SectionShell>
 </div>

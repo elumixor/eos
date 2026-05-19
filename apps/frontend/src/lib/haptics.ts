@@ -8,7 +8,24 @@ import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics";
 
 const native = Capacitor.isNativePlatform();
 
+// Browsers block navigator.vibrate until the user has interacted with the page
+// (https://chromestatus.com/feature/5644273861001216). Track interaction so we
+// silently skip calls that would otherwise log an Intervention warning.
+let userInteracted = false;
+if (typeof window !== "undefined") {
+  const mark = () => {
+    userInteracted = true;
+    for (const ev of ["pointerdown", "keydown", "touchstart"]) {
+      window.removeEventListener(ev, mark, true);
+    }
+  };
+  for (const ev of ["pointerdown", "keydown", "touchstart"]) {
+    window.addEventListener(ev, mark, { capture: true, passive: true });
+  }
+}
+
 function vibrate(pattern: number | number[]) {
+  if (!userInteracted) return;
   if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
     navigator.vibrate(pattern);
   }

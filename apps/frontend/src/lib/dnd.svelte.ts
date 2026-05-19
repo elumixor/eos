@@ -1,17 +1,21 @@
 // Pointer-based drag & drop shared state. Works for both touch (iOS) and mouse.
 // Lists register via `data-dnd-list="<id>"`, items via `data-dnd-item="<taskId>"`.
+//
+// A drag carries one or more task IDs; multi-drag is used when the user starts
+// dragging a task that is part of a multi-selection — the whole selection
+// travels together and is dropped as a contiguous group at the drop slot.
 
 import { selection, selectionEnd, selectionStart, tapMedium } from "$lib/haptics";
 
 interface DropPayload {
-  taskId: string;
+  taskIds: string[];
   from: string;
   to: string;
   index: number;
 }
 
 class Dnd {
-  taskId = $state<string | null>(null);
+  taskIds = $state<string[]>([]);
   label = $state("");
   fromList = $state<string | null>(null);
   overList = $state<string | null>(null);
@@ -22,16 +26,31 @@ class Dnd {
 
   onDrop: ((p: DropPayload) => void) | null = null;
 
+  /** First / primary task being dragged. Used for the ghost preview. */
+  get taskId() {
+    return this.taskIds[0] ?? null;
+  }
   get active() {
-    return this.taskId !== null;
+    return this.taskIds.length > 0;
+  }
+  has(id: string) {
+    return this.taskIds.includes(id);
   }
 
   private rafId = 0;
   private pendingX = 0;
   private pendingY = 0;
 
-  start(taskId: string, label: string, from: string, ev: PointerEvent, width: number) {
-    this.taskId = taskId;
+  // `ev` only needs the pointer position. A real PointerEvent works, but the
+  // long-press path begins mid-gesture and passes the last known coords.
+  start(
+    taskIds: string | string[],
+    label: string,
+    from: string,
+    ev: { clientX: number; clientY: number },
+    width: number,
+  ) {
+    this.taskIds = Array.isArray(taskIds) ? taskIds.slice() : [taskIds];
     this.label = label;
     this.fromList = from;
     this.overList = from;
@@ -43,6 +62,7 @@ class Dnd {
     this.width = width;
     // Suppress native text selection / iOS touch-callout for the whole drag.
     document.documentElement.classList.add("dnd-dragging");
+    selectionStart();
     window.addEventListener("pointermove", this.move, { passive: false });
     window.addEventListener("pointerup", this.end);
     window.addEventListener("pointercancel", this.end);
@@ -60,7 +80,7 @@ class Dnd {
 
   private flush = () => {
     this.rafId = 0;
-    if (this.taskId === null) return;
+    if (this.taskIds.length === 0) return;
 
     this.x = this.pendingX;
     this.y = this.pendingY;
@@ -73,10 +93,10 @@ class Dnd {
     const prevIndex = this.overIndex;
     this.overList = listEl.dataset.dndList ?? null;
 
-    // Items excluding the one being dragged, so the index maps directly onto
+    // Items excluding any being dragged, so the index maps directly onto
     // the post-removal array.
     const items = [...listEl.querySelectorAll<HTMLElement>("[data-dnd-item]")].filter(
-      (n) => n.dataset.dndItem !== this.taskId,
+      (n) => !this.taskIds.includes(n.dataset.dndItem ?? ""),
     );
 
     let idx = items.length;
@@ -102,18 +122,19 @@ class Dnd {
     window.removeEventListener("pointermove", this.move);
     window.removeEventListener("pointerup", this.end);
     window.removeEventListener("pointercancel", this.end);
+    selectionEnd();
 
-    if (this.taskId && this.fromList && this.overList && this.onDrop) {
+    if (this.taskIds.length && this.fromList && this.overList && this.onDrop) {
       tapMedium();
       this.onDrop({
-        taskId: this.taskId,
+        taskIds: this.taskIds.slice(),
         from: this.fromList,
         to: this.overList,
         index: this.overIndex,
       });
     }
 
-    this.taskId = null;
+    this.taskIds = [];
     this.fromList = null;
     this.overList = null;
   };

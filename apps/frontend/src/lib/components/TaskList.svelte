@@ -11,6 +11,8 @@
     onDeleteTask,
     onEditTask,
     onDuplicateTask,
+    onBulkDelete,
+    onBulkComplete,
   }: {
     tasks: Task[];
     listId: string;
@@ -19,11 +21,23 @@
     onDeleteTask: (task: Task) => void;
     onEditTask: (task: Task, text: string) => void;
     onDuplicateTask: (task: Task) => void;
+    onBulkDelete: (ids: string[]) => void;
+    onBulkComplete: (ids: string[], completed: boolean) => void;
   } = $props();
 
   const isOver = $derived(dnd.active && dnd.overList === listId);
-  // Index within the list excluding the dragged item.
-  const visible = $derived(tasks.filter((t) => t.id !== dnd.taskId));
+  // Push completed tasks to the bottom (most recently checked first within
+  // the done group) while preserving the caller's order for the rest.
+  const sorted = $derived.by(() => {
+    const pending: Task[] = [];
+    const done: Task[] = [];
+    for (const t of tasks) (t.completed ? done : pending).push(t);
+    done.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+    return [...pending, ...done];
+  });
+  // Index within the list excluding any items being dragged.
+  const visible = $derived(sorted.filter((t) => !dnd.has(t.id)));
+  const orderedIds = $derived(visible.map((t) => t.id));
 </script>
 
 <ul
@@ -39,10 +53,13 @@
       {task}
       index={i}
       {listId}
+      {orderedIds}
       onToggle={onToggleTask}
       onDelete={onDeleteTask}
       onEdit={onEditTask}
       onDuplicate={onDuplicateTask}
+      {onBulkDelete}
+      {onBulkComplete}
     />
   {/each}
 

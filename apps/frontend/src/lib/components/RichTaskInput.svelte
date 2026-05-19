@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Plus, MapPin } from "lucide-svelte";
+  import { Plus, MapPin, Link2 } from "lucide-svelte";
   import type { Project } from "$lib/api";
+  import { applyCap, toCapMode } from "$lib/capitalize";
   import { projects } from "$lib/projects.svelte";
   import { pillElement, renderEditorHtml } from "$lib/pillHtml";
-  import { suggestTokens, type Segment, type Suggestion } from "$lib/tokens";
+  import { fmtLinkLabel, isUrlLike, normalizeUrl, suggestTokens, type Segment, type Suggestion } from "$lib/tokens";
   import { searchPlaces, type Place } from "$lib/placeSearch";
 
   // Move the element to <body> so position:fixed is viewport-relative even
@@ -25,12 +26,15 @@
     autofocus = false,
     submitOnBlur = false,
     onsubmit,
+    onTabNav,
   }: {
     value?: string;
     placeholder?: string;
     autofocus?: boolean;
     submitOnBlur?: boolean;
     onsubmit: (text: string) => void;
+    /** Tab/Shift+Tab pressed with no autocomplete open — commit and move focus. */
+    onTabNav?: (dir: 1 | -1) => void;
   } = $props();
 
   let editor: HTMLDivElement | undefined = $state();
@@ -39,7 +43,8 @@
     | { kind: "project"; project: Project }
     | { kind: "create"; name: string }
     | { kind: "token"; sug: Suggestion }
-    | { kind: "place"; place: Place };
+    | { kind: "place"; place: Place }
+    | { kind: "link"; url: string };
 
   let open = $state(false);
   let items = $state<Item[]>([]);
@@ -207,11 +212,13 @@
     const exact = projects.list.find((p) => p.name.toLowerCase() === q);
 
     const tokens = suggestTokens(query).map((sug) => ({ kind: "token", sug }) as Item);
+    const linkUrl = isUrlLike(query) ? normalizeUrl(query) : null;
 
-    // Auto-rank: exact project → strong token → projects → places → tokens → create.
+    // Auto-rank: exact project → strong token → link → projects → places → tokens → create.
     if (exact) list.push({ kind: "project", project: exact });
     const strong = tokens.filter((t) => t.kind === "token" && t.sug.score >= 9);
     list.push(...strong);
+    if (linkUrl) list.push({ kind: "link", url: linkUrl });
     list.push(...matched.filter((p) => p !== exact).map((p) => ({ kind: "project", project: p }) as Item));
     list.push(...placeItems);
     list.push(...tokens.filter((t) => !strong.includes(t)));
@@ -249,6 +256,8 @@
       replaceQuery(
         pillElement({ kind: "place", name: item.place.name, lat: item.place.lat, lng: item.place.lng }),
       );
+    } else if (item.kind === "link") {
+      replaceQuery(pillElement({ kind: "link", url: item.url }));
     } else {
       const t = item.sug.token;
       let seg: Segment;
@@ -345,6 +354,13 @@
     if (e.key === "Enter") {
       e.preventDefault();
       submit();
+      return;
+    }
+    if (e.key === "Tab" && onTabNav) {
+      e.preventDefault();
+      const dir: 1 | -1 = e.shiftKey ? -1 : 1;
+      submit();
+      onTabNav(dir);
     }
   }
 
@@ -408,7 +424,7 @@
               {#await import("./ProjectAvatar.svelte") then { default: PA }}
                 <PA project={item.project} size={14} />
               {/await}
-              {item.project.name}
+              {applyCap(item.project.name, toCapMode(item.project.capitalization), true)}
             </span>
             {#if ups.length}
               <span class="ml-auto flex items-center gap-1 flex-wrap justify-end">
@@ -417,7 +433,7 @@
                     {#await import("./ProjectAvatar.svelte") then { default: PA }}
                       <PA project={up} size={12} />
                     {/await}
-                    {up.name}
+                    {applyCap(up.name, toCapMode(up.capitalization), true)}
                   </span>
                 {/each}
               </span>
@@ -426,6 +442,19 @@
                 Project
               </span>
             {/if}
+          {:else if item.kind === "link"}
+            <span
+              class="w-[18px] h-[18px] rounded-full bg-[oklch(72%_0.14_235_/_0.16)]
+                text-[oklch(78%_0.11_235)] flex items-center justify-center shrink-0"
+            >
+              <Link2 size={11} strokeWidth={2.5} />
+            </span>
+            <span class="text-[13px] font-medium text-[var(--color-ink)] flex-1 truncate">
+              {fmtLinkLabel(item.url)}
+            </span>
+            <span class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-ink-3)] truncate max-w-[40%]">
+              Link
+            </span>
           {:else if item.kind === "place"}
             <span
               class="w-[18px] h-[18px] rounded-full bg-[oklch(74%_0.14_155_/_0.16)]

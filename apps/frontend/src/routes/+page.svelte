@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Loader2, CheckCircle2, RotateCw, Plus, X } from "lucide-svelte";
+  import { Loader2, RotateCw, Plus, X } from "lucide-svelte";
+  import RichTaskInput from "$lib/components/RichTaskInput.svelte";
   import { api, type Section, type Task } from "$lib/api";
   import { dnd } from "$lib/dnd.svelte";
+  import { selection as multi } from "$lib/selection.svelte";
   import { projects } from "$lib/projects.svelte";
   import { sections } from "$lib/sections.svelte";
   import {
@@ -22,6 +24,7 @@
   import TaskContent from "$lib/components/TaskContent.svelte";
   import VoiceButton from "$lib/components/VoiceButton.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
+  import BoxSelect from "$lib/components/BoxSelect.svelte";
 
   let tasks = $state<Task[]>([]);
   let loading = $state(true);
@@ -31,6 +34,7 @@
   let selectedDate = $state(localISO(new Date(), false));
   // null = closed; { section } where section is null for "create".
   let editorFor = $state<{ section: Section | null } | null>(null);
+  let addInput: RichTaskInput | undefined = $state();
 
   const matchesFilter = (t: Task) => {
     if (!projects.filterId) return true;
@@ -75,38 +79,50 @@
   }
 
   async function commitDrop({
-    taskId,
+    taskIds,
     to,
     index,
   }: {
-    taskId: string;
+    taskIds: string[];
     from: string;
     to: string;
     index: number;
   }) {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return;
+    // Resolve dragged tasks in their original list order so a multi-drag
+    // preserves relative ordering at the drop site.
+    const dragged = taskIds
+      .map((id) => tasks.find((t) => t.id === id))
+      .filter((t): t is Task => !!t)
+      .sort((a, b) => a.order - b.order);
+    if (dragged.length === 0) return;
 
     const newDate = targetDate(to);
-    const hadChip = explicitDate(task.text) !== null;
-    const newText = hadChip ? setTaskDate(task.text, newDate) : task.text;
-    const textChanged = newText !== task.text;
+    const writes: Array<{ id: string; text: string }> = [];
+    for (const task of dragged) {
+      const hadChip = explicitDate(task.text) !== null;
+      const newText = hadChip ? setTaskDate(task.text, newDate) : task.text;
+      if (newText !== task.text) writes.push({ id: task.id, text: newText });
+      task.text = newText;
+      task.date = newDate;
+    }
 
-    task.text = newText;
-    task.date = newDate;
-
-    // Reorder within the destination date bucket.
+    // Reorder within the destination date bucket. Insert the dragged group
+    // as a contiguous run at the drop index.
+    const draggedIds = new Set(dragged.map((t) => t.id));
     const bucket = tasks
-      .filter((t) => t.id !== taskId && effectiveDate(t) === newDate)
+      .filter((t) => !draggedIds.has(t.id) && effectiveDate(t) === newDate)
       .sort((a, b) => a.order - b.order);
-    bucket.splice(Math.max(0, Math.min(index, bucket.length)), 0, task);
+    const at = Math.max(0, Math.min(index, bucket.length));
+    bucket.splice(at, 0, ...dragged);
     bucket.forEach((t, i) => (t.order = i));
 
     tasks = [...tasks];
 
-    if (textChanged) {
-      await api.tasks(task.id).$patch({ text: newText, ...extractFields(newText) });
-    }
+    await Promise.all(
+      writes.map((w) =>
+        api.tasks(w.id).$patch({ text: w.text, ...extractFields(w.text) }),
+      ),
+    );
     await api.tasks.reorder.$post({
       items: bucket.map((t) => ({ id: t.id, order: t.order, date: t.date })),
     });
@@ -115,6 +131,11 @@
   async function handleAddTask(date: string, text: string) {
     const task = await api.tasks.$post({ text, date, ...extractFields(text) });
     tasks = [...tasks, task];
+  }
+
+  function submitNewTask(text: string) {
+    void handleAddTask(selectedDate, text);
+    addInput?.clear();
   }
 
   async function handleToggleTask(task: Task) {
@@ -139,6 +160,20 @@
       ...extractFields(task.text),
     });
     tasks = [...tasks, created];
+  }
+
+  // ---- Bulk actions on the current selection ------------------------------
+  async function handleBulkDelete(ids: string[]) {
+    const set = new Set(ids);
+    tasks = tasks.filter((t) => !set.has(t.id));
+    multi.clear();
+    await Promise.all(ids.map((id) => api.tasks(id).$delete()));
+  }
+
+  async function handleBulkComplete(ids: string[], completed: boolean) {
+    const set = new Set(ids);
+    tasks = tasks.map((t) => (set.has(t.id) ? { ...t, completed } : t));
+    await Promise.all(ids.map((id) => api.tasks(id).$patch({ completed })));
   }
 
   async function handleVoiceRecorded(file: File) {
@@ -166,7 +201,7 @@
 <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] pointer-events-none
   bg-[radial-gradient(ellipse_at_center,var(--color-accent-glow)_0%,transparent_70%)] opacity-40"></div>
 
-<main class="relative max-w-md mx-auto px-5 pt-24 pb-12 safe-top safe-bottom min-h-screen">
+<main class="relative max-w-md mx-auto px-5 pt-24 pb-36 safe-top min-h-screen">
   <header class="flex items-center justify-between mb-10 animate-fade-up">
     <div>
       <h1 class="text-xl font-bold tracking-tight">Eos</h1>
@@ -225,11 +260,12 @@
       <DailySection
         tasks={dailyTasks}
         bind:selectedDate
-        onAddTask={handleAddTask}
         onToggleTask={handleToggleTask}
         onDeleteTask={handleDeleteTask}
         onEditTask={handleEditTask}
         onDuplicateTask={handleDuplicateTask}
+        onBulkDelete={handleBulkDelete}
+        onBulkComplete={handleBulkComplete}
       />
 
       {#each sections.list as section (section.id)}
@@ -237,11 +273,14 @@
         <RangeSection
           {section}
           tasks={visibleTasks}
+          excludeDate={selectedDate}
           onEditSection={(s) => (editorFor = { section: s })}
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}
           onEditTask={handleEditTask}
           onDuplicateTask={handleDuplicateTask}
+          onBulkDelete={handleBulkDelete}
+          onBulkComplete={handleBulkComplete}
         />
       {/each}
 
@@ -253,6 +292,8 @@
         onDeleteTask={handleDeleteTask}
         onEditTask={handleEditTask}
         onDuplicateTask={handleDuplicateTask}
+        onBulkDelete={handleBulkDelete}
+        onBulkComplete={handleBulkComplete}
       />
 
       <button
@@ -274,6 +315,40 @@
   <SectionEditor section={editorFor.section} onClose={() => (editorFor = null)} />
 {/if}
 
+{#if !loading}
+  <!-- Always-on add-task bar pinned to the bottom of the viewport. Adds to the
+       currently selected day (the DailySection's date picker controls that). -->
+  <div
+    class="fixed bottom-0 inset-x-0 z-40 pointer-events-none"
+  >
+    <div
+      class="max-w-md mx-auto px-5 pt-6 pointer-events-auto
+        bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)]/95 to-transparent"
+      style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));"
+    >
+      <div class="flex gap-2 items-start">
+        <RichTaskInput
+          bind:this={addInput}
+          placeholder="What needs doing?  (@ for project, date, duration)"
+          onsubmit={submitNewTask}
+        />
+        <button
+          type="button"
+          onclick={() => addInput?.submit()}
+          aria-label="Add task"
+          class="w-11 h-[46px] rounded-2xl bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]
+            flex items-center justify-center transition-all duration-300 shrink-0
+            hover:shadow-lg hover:shadow-[var(--color-accent-glow)] active:scale-95"
+        >
+          <Plus size={18} strokeWidth={2.5} class="text-[var(--color-bg)]" />
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<BoxSelect />
+
 <!-- Drag ghost -->
 {#if dnd.active}
   <div
@@ -283,7 +358,9 @@
     style="left: {dnd.x}px; top: {dnd.y}px; width: {dnd.width}px;
       transform: translate(-28px, -50%);"
   >
-    {#if draggedTask}
+    {#if dnd.taskIds.length > 1}
+      <span class="font-medium text-[var(--color-accent)]">{dnd.label}</span>
+    {:else if draggedTask}
       <TaskContent task={draggedTask} />
     {:else}
       {dnd.label}
