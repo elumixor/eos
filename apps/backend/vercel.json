@@ -1,5 +1,6 @@
 {
   "framework": "nitro",
   "installCommand": "cd ../.. && bun install",
-  "buildCommand": "bun run build"
+  "buildCommand": "bun run build",
+  "crons": [{ "path": "/cron/rollover", "schedule": "0 0 * * *" }]
 }
