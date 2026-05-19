@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Plus } from "lucide-svelte";
+  import { Plus, MapPin } from "lucide-svelte";
   import type { Project } from "$lib/api";
   import { projects } from "$lib/projects.svelte";
   import { pillElement, renderEditorHtml } from "$lib/pillHtml";
   import { suggestTokens, type Segment, type Suggestion } from "$lib/tokens";
+  import { searchPlaces, type Place } from "$lib/placeSearch";
 
   // Move the element to <body> so position:fixed is viewport-relative even
   // when an ancestor has a transform (animate-fade-up creates a containing
@@ -37,7 +38,8 @@
   type Item =
     | { kind: "project"; project: Project }
     | { kind: "create"; name: string }
-    | { kind: "token"; sug: Suggestion };
+    | { kind: "token"; sug: Suggestion }
+    | { kind: "place"; place: Place };
 
   let open = $state(false);
   let items = $state<Item[]>([]);
@@ -142,6 +144,12 @@
   function close() {
     open = false;
     qNode = null;
+    placeItems = [];
+    placeQuery = "";
+    if (placeTimer) {
+      clearTimeout(placeTimer);
+      placeTimer = null;
+    }
   }
 
   function detectQuery() {
@@ -152,7 +160,9 @@
     if (node.nodeType !== Node.TEXT_NODE || !editor?.contains(node)) return close();
     const text = (node as Text).textContent ?? "";
     const before = text.slice(0, range.startOffset);
-    const m = before.match(/@([^\s@]*)$/);
+    // Allow one inner space so "@tomorrow 19pm" / "@eiffel tower" keeps the
+    // picker open. A second space (or another @) closes it.
+    const m = before.match(/@([^\s@]*(?: [^\s@]*)?)$/);
     if (!m) return close();
     qNode = node as Text;
     qStart = range.startOffset - m[0].length;
@@ -160,7 +170,30 @@
     buildItems(m[1]);
   }
 
-  function buildItems(query: string) {
+  // Debounced Google Places lookup. Latest-query-wins; out-of-date responses
+  // are dropped so a slow flight doesn't clobber what the user is seeing now.
+  let placeTimer: ReturnType<typeof setTimeout> | null = null;
+  let placeQuery = "";
+  let placeItems = $state<Item[]>([]);
+  function schedulePlaceSearch(query: string) {
+    if (placeTimer) clearTimeout(placeTimer);
+    if (query.trim().length < 2) {
+      placeItems = [];
+      placeQuery = query;
+      return;
+    }
+    placeTimer = setTimeout(async () => {
+      const issued = query;
+      placeQuery = issued;
+      const results = await searchPlaces(issued);
+      if (placeQuery !== issued) return; // user kept typing
+      placeItems = results.map((p) => ({ kind: "place", place: p }));
+      // Rebuild visible items with the new place batch merged in.
+      buildItems(issued, true);
+    }, 200);
+  }
+
+  function buildItems(query: string, skipPlaceFetch = false) {
     const q = query.trim().toLowerCase();
     const list: Item[] = [];
 
@@ -175,17 +208,20 @@
 
     const tokens = suggestTokens(query).map((sug) => ({ kind: "token", sug }) as Item);
 
-    // Auto-rank: exact project → strong token → projects → tokens → create.
+    // Auto-rank: exact project → strong token → projects → places → tokens → create.
     if (exact) list.push({ kind: "project", project: exact });
     const strong = tokens.filter((t) => t.kind === "token" && t.sug.score >= 9);
     list.push(...strong);
     list.push(...matched.filter((p) => p !== exact).map((p) => ({ kind: "project", project: p }) as Item));
+    list.push(...placeItems);
     list.push(...tokens.filter((t) => !strong.includes(t)));
     if (q && !exact) list.push({ kind: "create", name: query.trim() });
 
     items = list;
     active = 0;
     open = list.length > 0;
+
+    if (!skipPlaceFetch) schedulePlaceSearch(query);
   }
 
   function replaceQuery(html: string) {
@@ -209,6 +245,10 @@
     } else if (item.kind === "create") {
       const p = await projects.create(item.name);
       replaceQuery(pillElement({ kind: "project", id: p.id, project: p }));
+    } else if (item.kind === "place") {
+      replaceQuery(
+        pillElement({ kind: "place", name: item.place.name, lat: item.place.lat, lng: item.place.lng }),
+      );
     } else {
       const t = item.sug.token;
       let seg: Segment;
@@ -363,13 +403,42 @@
             {i === active ? 'bg-[var(--color-surface-3)]' : ''}"
         >
           {#if item.kind === "project"}
-            {#await import("./ProjectAvatar.svelte") then { default: PA }}
-              <PA project={item.project} size={18} />
-            {/await}
-            <span class="text-[13px] font-medium text-[var(--color-ink)] flex-1 truncate">
+            {@const ups = projects.parentsOf(item.project.id)}
+            <span class="pill pill-project">
+              {#await import("./ProjectAvatar.svelte") then { default: PA }}
+                <PA project={item.project} size={14} />
+              {/await}
               {item.project.name}
             </span>
-            <span class="text-[10px] uppercase tracking-wider text-[var(--color-ink-3)]">Project</span>
+            {#if ups.length}
+              <span class="ml-auto flex items-center gap-1 flex-wrap justify-end">
+                {#each ups as up (up.id)}
+                  <span class="pill pill-project pill-muted">
+                    {#await import("./ProjectAvatar.svelte") then { default: PA }}
+                      <PA project={up} size={12} />
+                    {/await}
+                    {up.name}
+                  </span>
+                {/each}
+              </span>
+            {:else}
+              <span class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-ink-3)]">
+                Project
+              </span>
+            {/if}
+          {:else if item.kind === "place"}
+            <span
+              class="w-[18px] h-[18px] rounded-full bg-[oklch(74%_0.14_155_/_0.16)]
+                text-[oklch(78%_0.12_155)] flex items-center justify-center shrink-0"
+            >
+              <MapPin size={11} strokeWidth={2.5} />
+            </span>
+            <span class="text-[13px] font-medium text-[var(--color-ink)] flex-1 truncate">
+              {item.place.name}
+            </span>
+            <span class="ml-auto text-[10px] uppercase tracking-wider text-[var(--color-ink-3)] truncate max-w-[40%]">
+              {item.place.address || "Place"}
+            </span>
           {:else if item.kind === "create"}
             <span
               class="w-[18px] h-[18px] rounded-full bg-[var(--color-accent-dim)] text-[var(--color-accent)]

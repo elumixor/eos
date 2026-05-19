@@ -229,6 +229,14 @@ html.dnd-dragging * {
   padding-left: 7px;
 }
 html.light .pill-dur { color: oklch(45% 0.12 280); }
+.pill-place {
+  background: oklch(74% 0.14 155 / 0.16);
+  color: oklch(78% 0.12 155);
+  padding-left: 7px;
+  text-decoration: none;
+}
+html.light .pill-place { color: oklch(42% 0.13 155); }
+.pill-place:hover { filter: brightness(1.15); }
 .pill-emoji {
   display: inline-flex;
   align-items: center;

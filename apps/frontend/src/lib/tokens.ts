@@ -1,17 +1,19 @@
 import type { Project, Section, Task } from "$lib/api";
 
 // ── Canonical token format stored inside Task.text ──────────────
-//   @project:<cuid>          → project pill
-//   @time:YYYY-MM-DD         → date pill (no time)
-//   @time:YYYY-MM-DDTHH:MM   → datetime pill
-//   @dur:<minutes>           → duration pill
-export const TOKEN_RE = /@(project|time|dur):([0-9A-Za-z:T-]+)/g;
+//   @project:<cuid>                      → project pill
+//   @time:YYYY-MM-DD                     → date pill (no time)
+//   @time:YYYY-MM-DDTHH:MM               → datetime pill
+//   @dur:<minutes>                       → duration pill
+//   @place:<urlEncodedName>|<lat>,<lng>  → Google Maps place pill
+export const TOKEN_RE = /@(project|time|dur|place):([^\s@]+)/g;
 
 export type Segment =
   | { kind: "text"; value: string }
   | { kind: "project"; id: string; project: Project | undefined }
   | { kind: "time"; date: Date; hasTime: boolean }
-  | { kind: "dur"; minutes: number };
+  | { kind: "dur"; minutes: number }
+  | { kind: "place"; name: string; lat: number; lng: number };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -41,6 +43,15 @@ export function parseSegments(text: string, projects: Project[]): Segment[] {
       segs.push({ kind: "project", id: value, project: projects.find((p) => p.id === value) });
     } else if (type === "dur") {
       segs.push({ kind: "dur", minutes: Number(value) });
+    } else if (type === "place") {
+      const pm = value.match(/^([^|]+)\|(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+      if (pm) {
+        try {
+          segs.push({ kind: "place", name: decodeURIComponent(pm[1]), lat: Number(pm[2]), lng: Number(pm[3]) });
+        } catch {
+          segs.push({ kind: "text", value: full });
+        }
+      } else segs.push({ kind: "text", value: full });
     } else {
       const iso = parseISO(value);
       if (iso) segs.push({ kind: "time", date: iso.date, hasTime: iso.hasTime });

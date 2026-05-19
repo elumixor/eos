@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Clock, Hourglass } from "lucide-svelte";
+  import { Clock, Hourglass, MapPin } from "lucide-svelte";
   import type { Task } from "$lib/api";
   import { projects } from "$lib/projects.svelte";
   import { fmtDateTime, fmtDuration, parseSegments } from "$lib/tokens";
+  import { placeUrl } from "$lib/placeSearch";
   import ProjectAvatar from "./ProjectAvatar.svelte";
 
   let { task, dimmed = false }: { task: Task; dimmed?: boolean } = $props();
@@ -44,6 +45,18 @@
         <Hourglass size={11} strokeWidth={2.5} />
         {fmtDuration(seg.minutes)}
       </span>
+    {:else if seg.kind === "place"}
+      <a
+        class="pill pill-place"
+        href={placeUrl(seg.name, seg.lat, seg.lng)}
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={(e) => e.stopPropagation()}
+        onpointerdown={(e) => e.stopPropagation()}
+      >
+        <MapPin size={11} strokeWidth={2.5} />
+        {seg.name}
+      </a>
     {/if}
   {/each}
 </span>
