@@ -10,14 +10,37 @@ export default handler(
       emoji: z.string().nullable().optional(),
       image: z.string().nullable().optional(),
       hue: z.number().int().min(0).max(360).nullable().optional(),
+      hidden: z.boolean().optional(),
+      capitalization: z.enum(["sentence", "lower", "capitalized", "upper"]).optional(),
+      parentIds: z.array(z.string()).optional(),
     },
   },
-  async ({ body: { name, avatarType, emoji, image } }) => {
-    const existing = await prisma.project.findUnique({ where: { name } });
-    if (existing) return existing;
-
-    return prisma.project.create({
-      data: { name, avatarType: avatarType ?? "auto", emoji, image },
+  async ({ body: { name, avatarType, emoji, image, hue, hidden, capitalization, parentIds } }) => {
+    const existing = await prisma.project.findUnique({
+      where: { name },
+      include: { parents: { select: { parentId: true } } },
     });
+    if (existing) {
+      const { parents, ...rest } = existing;
+      return { ...rest, parentIds: parents.map((p) => p.parentId) };
+    }
+
+    const created = await prisma.project.create({
+      data: {
+        name,
+        avatarType: avatarType ?? "auto",
+        emoji,
+        image,
+        hue,
+        hidden: hidden ?? false,
+        capitalization: capitalization ?? "sentence",
+        parents: parentIds?.length
+          ? { create: parentIds.map((parentId) => ({ parentId })) }
+          : undefined,
+      },
+      include: { parents: { select: { parentId: true } } },
+    });
+    const { parents, ...rest } = created;
+    return { ...rest, parentIds: parents.map((p) => p.parentId) };
   },
 );

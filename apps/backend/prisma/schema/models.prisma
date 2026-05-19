@@ -19,11 +19,25 @@ model Project {
   emoji      String?
   image      String? // base64 data URL
   hue        Int? // 0-360 override for the generated avatar
-  parentId   String?
-  parent     Project?  @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children   Project[] @relation("ProjectTree")
+  hidden     Boolean  @default(false)
+  capitalization String @default("sentence") // sentence | lower | capitalized | upper
+  order      Int      @default(0)
+  parents    ProjectParent[] @relation("ChildToParents")
+  children   ProjectParent[] @relation("ParentToChildren")
   tasks      Task[]
   createdAt  DateTime @default(now())
+}
+
+// DAG: a project can have any number of parents (and children).
+// onDelete: Cascade so removing a project tidies its edges.
+model ProjectParent {
+  childId  String
+  parentId String
+  child    Project @relation("ChildToParents", fields: [childId], references: [id], onDelete: Cascade)
+  parent   Project @relation("ParentToChildren", fields: [parentId], references: [id], onDelete: Cascade)
+
+  @@id([childId, parentId])
+  @@index([parentId])
 }
 
 model Task {
