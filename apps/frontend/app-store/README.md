@@ -10,6 +10,15 @@ app-store/
   categories.txt
   age_rating.md
   review_notes.md
+  review_information/      # contact + demo-account fields, see its README
+    first_name.txt
+    last_name.txt
+    phone_number.txt
+    email_address.txt
+    demo_account_required.txt
+    demo_user.txt
+    demo_password.txt
+    notes.txt
   metadata/
     en-US/
       name.txt              ≤30
