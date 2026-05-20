@@ -1,0 +1,1 @@
+A minimal todo app. Type a line, and project, time, and duration turn into chips automatically. Send a message to the Telegram bot and it lands in your inbox.

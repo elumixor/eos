@@ -1,0 +1,7 @@
+First release of Eos.
+
+• Minimal todo app with parsed chips for project, time, and duration
+• Telegram sync: send a message, get a task
+• Drag-and-drop scheduling across days and sections
+• Sign in with Google or Apple, or stay anonymous
+• iPhone and iPad support
