@@ -1,13 +1,18 @@
 import { defineEventHandler, setResponseHeaders } from "h3";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
 export default defineEventHandler((event) => {
-  setResponseHeaders(event, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  });
+  setResponseHeaders(event, CORS_HEADERS);
 
   if (event.method === "OPTIONS") {
-    event.respondWith(new Response(null, { status: 204 }));
+    // Construct the preflight response with the headers explicitly — a fresh
+    // Response doesn't inherit what setResponseHeaders set on the event.
+    event.respondWith(new Response(null, { status: 204, headers: CORS_HEADERS }));
   }
 });
