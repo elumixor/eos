@@ -1,5 +1,20 @@
+model User {
+  id        String   @id @default(cuid())
+  // Email is null for anonymous users created via /auth/anonymous.
+  // On Google/Apple sign-in we populate this field (or merge into an
+  // existing row), so `email IS NULL` doubles as the anonymous marker.
+  email     String?  @unique
+  name      String?
+  sections  Section[]
+  projects  Project[]
+  tasks     Task[]
+  createdAt DateTime @default(now())
+}
+
 model Section {
   id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   rangeKind String // calendar | relative | absolute
   unit      String? // day | week | month | year  (calendar/relative)
@@ -10,11 +25,15 @@ model Section {
   order     Int      @default(0)
   collapsed Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Project {
   id         String   @id @default(cuid())
-  name       String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
   avatarType String   @default("auto") // auto | emoji | image
   emoji      String?
   image      String? // base64 data URL
@@ -26,6 +45,9 @@ model Project {
   children   ProjectParent[] @relation("ParentToChildren")
   tasks      Task[]
   createdAt  DateTime @default(now())
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 // DAG: a project can have any number of parents (and children).
@@ -42,6 +64,8 @@ model ProjectParent {
 
 model Task {
   id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   text      String
   completed Boolean   @default(false)
   order     Int       @default(0)
@@ -52,4 +76,6 @@ model Task {
   duration  Int? // minutes
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  @@index([userId])
 }
