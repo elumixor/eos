@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { api } from "$lib/api/client";
   import { auth } from "$lib/auth.svelte";
+  import { portal } from "$lib/portal";
   import { user } from "$lib/user.svelte";
 
   const me = $derived(user.me);
@@ -133,6 +134,7 @@
 
 {#if open}
   <div
+    use:portal
     class="fixed inset-0 z-50 grid place-items-center px-4 py-6 bg-black/70 backdrop-blur-md overscroll-contain
       [-webkit-tap-highlight-color:transparent]"
     onclick={() => (open = false)}
