@@ -133,13 +133,14 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 grid place-items-center px-4 py-6 bg-black/60 backdrop-blur-md overscroll-contain"
+    class="fixed inset-0 z-50 grid place-items-center px-4 py-6 bg-black/70 backdrop-blur-md overscroll-contain
+      [-webkit-tap-highlight-color:transparent]"
     onclick={() => (open = false)}
     role="presentation"
     transition:fade={{ duration: 150 }}
   >
     <div
-      class="relative w-full max-w-[22rem] rounded-3xl bg-[var(--color-surface-1)] p-6 shadow-2xl
+      class="relative w-full max-w-[22rem] rounded-3xl bg-[var(--color-surface)] p-6 shadow-2xl
         ring-1 ring-black/5 dark:ring-white/10"
       onclick={(e) => e.stopPropagation()}
       role="dialog"
@@ -150,7 +151,7 @@
         onclick={() => (open = false)}
         aria-label="Close"
         class="absolute top-3 right-3 w-8 h-8 rounded-full
-          flex items-center justify-center text-[var(--color-ink-3)]
+          flex items-center justify-center text-[var(--color-ink-2)]
           hover:bg-[var(--color-surface-2)] transition-colors"
       >
         <X size={16} />
@@ -158,7 +159,7 @@
 
       {#if anonymous}
         <h2 class="text-lg font-semibold mb-1">Sign in</h2>
-        <p class="text-sm text-[var(--color-ink-3)] mb-5 pr-6">
+        <p class="text-sm text-[var(--color-ink-2)] mb-5 pr-6">
           Keep your tasks safe across devices. Anything you've added so far carries over.
         </p>
         <div class="flex flex-col gap-2">
@@ -184,7 +185,7 @@
               bg-black text-white hover:bg-neutral-800 disabled:opacity-60 transition-colors"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor">
-              <path d="M16.365 1.43c0 1.14-.42 2.18-1.13 2.99-.78.92-2.07 1.62-3.13 1.54-.13-1.1.42-2.25 1.12-3 .79-.85 2.13-1.5 3.14-1.53zM20.79 17.39c-.55 1.27-1.21 2.5-2.11 3.6-1.21 1.49-2.91 3.34-5.02 3.36-1.88.02-2.37-1.21-4.93-1.2-2.55.01-3.09 1.23-4.97 1.21-2.11-.02-3.71-1.69-4.92-3.18-3.39-4.16-3.74-9.06-1.65-11.66 1.49-1.85 3.83-2.93 6.04-2.93 2.25 0 3.66 1.22 5.52 1.22 1.8 0 2.9-1.22 5.5-1.22 1.97 0 4.06 1.07 5.55 2.93-4.87 2.66-4.08 9.61.99 8.87z" />
+              <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09M12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25"/>
             </svg>
             <span class="text-sm font-medium">{signingIn ? "Signing in…" : "Continue with Apple"}</span>
           </button>
@@ -194,7 +195,7 @@
         {/if}
       {:else}
         <h2 class="text-lg font-semibold mb-1">Signed in</h2>
-        <p class="text-sm text-[var(--color-ink-3)] mb-5 pr-6 truncate">{me?.email}</p>
+        <p class="text-sm text-[var(--color-ink-2)] mb-5 pr-6 truncate">{me?.email}</p>
         <button
           onclick={handleSignOut}
           class="flex items-center justify-center gap-2 w-full h-12 rounded-2xl
