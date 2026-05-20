@@ -24,6 +24,7 @@
   import TaskContent from "$lib/components/TaskContent.svelte";
   import VoiceButton from "$lib/components/VoiceButton.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
+  import AccountButton from "$lib/components/AccountButton.svelte";
   import BoxSelect from "$lib/components/BoxSelect.svelte";
 
   let tasks = $state<Task[]>([]);
@@ -211,6 +212,7 @@
     </div>
 
     <div class="flex items-center gap-2">
+      <AccountButton />
       <ThemeToggle />
       <button
         onclick={refresh}
