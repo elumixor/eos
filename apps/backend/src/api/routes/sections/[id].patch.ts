@@ -1,3 +1,5 @@
+import { createError } from "h3";
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -16,9 +18,13 @@ export default handler(
       order: z.number().int().optional(),
     },
   },
-  ({ router, body }) =>
-    prisma.section.update({
-      where: { id: router.id },
+  async ({ user, router, body }) => {
+    requireAuth(user);
+    const result = await prisma.section.updateMany({
+      where: { id: router.id, userId: user.id },
       data: body,
-    }),
+    });
+    if (result.count === 0) throw createError({ statusCode: 404, statusMessage: "Section not found" });
+    return prisma.section.findUniqueOrThrow({ where: { id: router.id } });
+  },
 );

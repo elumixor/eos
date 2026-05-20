@@ -1,3 +1,5 @@
+import { createError } from "h3";
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -15,14 +17,22 @@ export default handler(
       parentIds: z.array(z.string()).optional(),
     },
   },
-  async ({ router, body }) => {
+  async ({ user, router, body }) => {
+    requireAuth(user);
     const { parentIds, ...scalar } = body;
+
+    const owner = await prisma.project.findFirst({
+      where: { id: router.id, userId: user.id },
+      select: { id: true },
+    });
+    if (!owner) throw createError({ statusCode: 404, statusMessage: "Project not found" });
 
     // DAG cycle guard: for each proposed parent, walking up its ancestors
     // must not reach this project.
     if (parentIds && parentIds.length) {
       if (parentIds.includes(router.id)) throw new Error("A project cannot be its own parent");
       const edges = await prisma.projectParent.findMany({
+        where: { child: { userId: user.id } },
         select: { childId: true, parentId: true },
       });
       const parentsOf = new Map<string, string[]>();

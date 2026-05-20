@@ -1,3 +1,5 @@
+import { createError } from "h3";
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -14,14 +16,17 @@ export default handler(
       duration: z.number().nullable().optional(),
     },
   },
-  ({ router, body }) => {
+  async ({ user, router, body }) => {
+    requireAuth(user);
     const { startTime, ...rest } = body;
-    return prisma.task.update({
-      where: { id: router.id },
+    const result = await prisma.task.updateMany({
+      where: { id: router.id, userId: user.id },
       data: {
         ...rest,
         ...(startTime !== undefined ? { startTime: startTime ? new Date(startTime) : null } : {}),
       },
     });
+    if (result.count === 0) throw createError({ statusCode: 404, statusMessage: "Task not found" });
+    return prisma.task.findUniqueOrThrow({ where: { id: router.id } });
   },
 );

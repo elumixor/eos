@@ -1,5 +1,6 @@
 import { env } from "env";
 import { readFormData } from "h3";
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 
@@ -9,8 +10,9 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function allTasks() {
+function allTasks(userId: string) {
   return prisma.task.findMany({
+    where: { userId },
     orderBy: [{ date: "asc" }, { order: "asc" }],
   });
 }
@@ -21,7 +23,8 @@ interface Action {
   text?: string;
 }
 
-export default handler(async ({ event }) => {
+export default handler(async ({ user, event }) => {
+  requireAuth(user);
   const formData = await readFormData(event);
   const audioFile = formData.get("audio") as File;
 
@@ -52,13 +55,13 @@ export default handler(async ({ event }) => {
   const language = transcription.language?.trim() || "the language the user spoke";
 
   if (!spoken) {
-    return { transcription: "", message: null, tasks: await allTasks() };
+    return { transcription: "", message: null, tasks: await allTasks(user.id) };
   }
 
   // 2. Give the model the current task lists (with ids) so it can act on
   //    them, then ask it for a list of mutations to apply.
   const today = todayDate();
-  const flat = await allTasks();
+  const flat = await allTasks(user.id);
   const todayTasks = flat.filter((t) => t.date === today);
   const unscheduledTasks = flat.filter((t) => t.date === null);
 
@@ -134,11 +137,12 @@ ${context}`;
   for (const a of actions) {
     if (a.op === "create" && a.text?.trim()) {
       const maxOrder = await prisma.task.aggregate({
-        where: { date: today },
+        where: { userId: user.id, date: today },
         _max: { order: true },
       });
       await prisma.task.create({
         data: {
+          userId: user.id,
           text: a.text.trim(),
           date: today,
           order: (maxOrder._max.order ?? -1) + 1,
@@ -159,5 +163,5 @@ ${context}`;
 
   const message = typeof parsed.message === "string" && parsed.message.trim() ? parsed.message.trim() : null;
 
-  return { transcription: spoken, message, tasks: await allTasks() };
+  return { transcription: spoken, message, tasks: await allTasks(user.id) };
 });

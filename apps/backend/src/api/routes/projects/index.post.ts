@@ -1,3 +1,4 @@
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -15,9 +16,10 @@ export default handler(
       parentIds: z.array(z.string()).optional(),
     },
   },
-  async ({ body: { name, avatarType, emoji, image, hue, hidden, capitalization, parentIds } }) => {
+  async ({ user, body: { name, avatarType, emoji, image, hue, hidden, capitalization, parentIds } }) => {
+    requireAuth(user);
     const existing = await prisma.project.findUnique({
-      where: { name },
+      where: { userId_name: { userId: user.id, name } },
       include: { parents: { select: { parentId: true } } },
     });
     if (existing) {
@@ -27,6 +29,7 @@ export default handler(
 
     const created = await prisma.project.create({
       data: {
+        userId: user.id,
         name,
         avatarType: avatarType ?? "auto",
         emoji,

@@ -1,3 +1,4 @@
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -14,10 +15,14 @@ export default handler(
       endDate: z.string().nullable().optional(),
     },
   },
-  async ({ body }) => {
-    const maxOrder = await prisma.section.aggregate({ _max: { order: true } });
+  async ({ user, body }) => {
+    requireAuth(user);
+    const maxOrder = await prisma.section.aggregate({
+      where: { userId: user.id },
+      _max: { order: true },
+    });
     return prisma.section.create({
-      data: { ...body, order: (maxOrder._max.order ?? -1) + 1 },
+      data: { ...body, userId: user.id, order: (maxOrder._max.order ?? -1) + 1 },
     });
   },
 );

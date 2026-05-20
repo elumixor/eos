@@ -1,3 +1,4 @@
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -12,14 +13,16 @@ export default handler(
       duration: z.number().nullable().optional(),
     },
   },
-  async ({ body: { text, date, projectId, startTime, duration } }) => {
+  async ({ user, body: { text, date, projectId, startTime, duration } }) => {
+    requireAuth(user);
     const maxOrder = await prisma.task.aggregate({
-      where: { date: date ?? null },
+      where: { userId: user.id, date: date ?? null },
       _max: { order: true },
     });
 
     return prisma.task.create({
       data: {
+        userId: user.id,
         text,
         date: date ?? null,
         projectId: projectId ?? null,

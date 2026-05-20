@@ -1,3 +1,4 @@
+import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
@@ -14,13 +15,11 @@ export default handler(
       ),
     },
   },
-  async ({ body: { items } }) => {
+  async ({ user, body: { items } }) => {
+    requireAuth(user);
     await prisma.$transaction(
       items.map(({ id, order, date }) =>
-        prisma.task.update({
-          where: { id },
-          data: { order, date },
-        }),
+        prisma.task.updateMany({ where: { id, userId: user.id }, data: { order, date } }),
       ),
     );
 

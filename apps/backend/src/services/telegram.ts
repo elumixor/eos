@@ -3,6 +3,10 @@ import { prisma } from "services/prisma";
 
 const API = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
 
+// Telegram bot has no per-chat user mapping yet. Pin all bot-side writes to
+// the seed/owner user; revisit once we support linking chatId -> userId.
+const TELEGRAM_OWNER_USER_ID = "user_seed_vladogim97";
+
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -18,7 +22,7 @@ async function sendMessage(chatId: number | string, text: string, options?: { re
 async function getToday() {
   const date = todayDate();
   const tasks = await prisma.task.findMany({
-    where: { date },
+    where: { date, userId: TELEGRAM_OWNER_USER_ID },
     orderBy: { order: "asc" },
   });
   return { date, tasks };
@@ -64,10 +68,18 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
     if (!taskText) return sendMessage(chatId, "Usage: /add <task text>");
 
     const date = todayDate();
-    const maxOrder = await prisma.task.aggregate({ where: { date }, _max: { order: true } });
+    const maxOrder = await prisma.task.aggregate({
+      where: { date, userId: TELEGRAM_OWNER_USER_ID },
+      _max: { order: true },
+    });
 
     await prisma.task.create({
-      data: { text: taskText, date, order: (maxOrder._max.order ?? -1) + 1 },
+      data: {
+        userId: TELEGRAM_OWNER_USER_ID,
+        text: taskText,
+        date,
+        order: (maxOrder._max.order ?? -1) + 1,
+      },
     });
 
     await sendMessage(chatId, formatDayTasks(await getToday()));
@@ -118,9 +130,17 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
 
   // Default: treat as a task to add
   const date = todayDate();
-  const maxOrder = await prisma.task.aggregate({ where: { date }, _max: { order: true } });
+  const maxOrder = await prisma.task.aggregate({
+    where: { date, userId: TELEGRAM_OWNER_USER_ID },
+    _max: { order: true },
+  });
   await prisma.task.create({
-    data: { text, date, order: (maxOrder._max.order ?? -1) + 1 },
+    data: {
+      userId: TELEGRAM_OWNER_USER_ID,
+      text,
+      date,
+      order: (maxOrder._max.order ?? -1) + 1,
+    },
   });
   await sendMessage(chatId, `Added!\n\n${formatDayTasks(await getToday())}`);
 }
