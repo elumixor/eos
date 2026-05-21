@@ -133,6 +133,7 @@
     // Collapse only runs of inline whitespace (spaces/tabs); keep newlines.
     // trim() removes leading/trailing \n as well as spaces.
     return out
+      .replace(/​/g, "")
       .replace(/[ \t]+/g, " ")
       .replace(/ ?\n ?/g, "\n")
       .trim();
