@@ -145,13 +145,16 @@
   // latest tap's outcome may write back to state. In-flight responses for
   // superseded taps are discarded, so we never overwrite a newer optimistic
   // flip with a stale server payload, and a failure on a stale request never
-  // reverts the user's newer intent.
+  // reverts the user's newer intent. `confirmedToggle` mirrors the last
+  // server-acknowledged completed value so a rollback restores the truth on
+  // the server rather than whatever optimistic state was visible at tap time.
   const toggleSeq = new Map<string, number>();
+  const confirmedToggle = new Map<string, boolean>();
 
   async function handleToggleTask(task: Task) {
     const id = task.id;
     const target = !task.completed;
-    const prev = task.completed;
+    if (!confirmedToggle.has(id)) confirmedToggle.set(id, task.completed);
     // Optimistic: flip the visual state immediately.
     tasks = tasks.map((t) => (t.id === id ? { ...t, completed: target } : t));
     const seq = (toggleSeq.get(id) ?? 0) + 1;
@@ -159,11 +162,13 @@
     try {
       const updated = await api.tasks(id).$patch({ completed: target });
       if (toggleSeq.get(id) !== seq) return; // superseded by a newer tap
+      confirmedToggle.set(id, updated.completed);
       tasks = tasks.map((t) => (t.id === updated.id ? updated : t));
       toggleSeq.delete(id);
     } catch {
       if (toggleSeq.get(id) !== seq) return; // newer tap is authoritative
-      tasks = tasks.map((t) => (t.id === id ? { ...t, completed: prev } : t));
+      const safe = confirmedToggle.get(id) ?? !target;
+      tasks = tasks.map((t) => (t.id === id ? { ...t, completed: safe } : t));
       toggleSeq.delete(id);
       toasts.error("Couldn't update task — please try again");
     }
