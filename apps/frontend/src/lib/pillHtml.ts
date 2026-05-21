@@ -33,15 +33,13 @@ export function avatarHtml(project: Project | undefined, name: string, size = 15
 function pillInner(seg: Segment, atSentenceStart = true): string {
   if (seg.kind === "project") {
     const raw = seg.project?.name ?? "Unknown";
-    const display = seg.project
-      ? applyCap(raw, toCapMode(seg.project.capitalization), atSentenceStart)
-      : raw;
+    const display = seg.project ? applyCap(raw, toCapMode(seg.project.capitalization), atSentenceStart) : raw;
     return `${avatarHtml(seg.project, raw)}<span>${esc(display)}</span>`;
   }
-  if (seg.kind === "time")
-    return `${CLOCK}<span>${esc(fmtDateTime(seg.date, seg.hasTime, atSentenceStart))}</span>`;
+  if (seg.kind === "time") return `${CLOCK}<span>${esc(fmtDateTime(seg.date, seg.hasTime, atSentenceStart))}</span>`;
   if (seg.kind === "dur") return `${HOURGLASS}<span>${esc(fmtDuration(seg.minutes))}</span>`;
-  if (seg.kind === "place") return `${MAPPIN}<span>${esc(seg.name)}</span>`;
+  if (seg.kind === "place")
+    return `${MAPPIN}<span class="pill-place-name" title="${esc(seg.name)}">${esc(seg.name)}</span>`;
   if (seg.kind === "link") return `${LINK}<span>${esc(fmtLinkLabel(seg.url))}</span>`;
   return "";
 }
