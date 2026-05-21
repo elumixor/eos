@@ -4,6 +4,11 @@ class ProjectsStore {
   list = $state<Project[]>([]);
   filterId = $state<string | null>(null);
   showHidden = $state(false);
+  // What `filterId` was before a task-pill tap activated the current filter.
+  // Re-tapping the same in-task pill restores it ("peek and pop"). Only set
+  // via `setFilterFromTask`; the chip-row `toggleFilter` keeps plain toggle
+  // semantics so the existing FilterBar UX doesn't change.
+  private previousFilterId: string | null = null;
 
   get visible(): Project[] {
     return this.list.filter((p) => !p.hidden);
@@ -19,6 +24,13 @@ class ProjectsStore {
 
   async load() {
     this.list = await api.projects.$get();
+    // Reconcile filter pointers against the freshly-loaded list: another
+    // session may have deleted a project that we still reference, leaving a
+    // dangling id that would let `setFilterFromTask`'s pop restore a ghost
+    // filter (matches nothing, can't be cleared via the chip row).
+    const ids = new Set(this.list.map((p) => p.id));
+    if (this.filterId && !ids.has(this.filterId)) this.filterId = null;
+    if (this.previousFilterId && !ids.has(this.previousFilterId)) this.previousFilterId = null;
   }
 
   byId(id: string | null | undefined): Project | undefined {
@@ -60,10 +72,35 @@ class ProjectsStore {
     await api.projects(id).$delete();
     this.list = this.list.filter((p) => p.id !== id);
     if (this.filterId === id) this.filterId = null;
+    if (this.previousFilterId === id) this.previousFilterId = null;
   }
 
   toggleFilter(id: string) {
+    this.previousFilterId = null;
     this.filterId = this.filterId === id ? null : id;
+  }
+
+  // Called when a `@project` pill inside a task is tapped. Switches the
+  // active filter to that project while remembering the prior filter so a
+  // second tap on the same in-task pill pops back. If the targeted project
+  // is hidden, also reveal the hidden chips so the user has a visible
+  // affordance for what's filtered and how to undo it.
+  setFilterFromTask(id: string) {
+    if (this.filterId === id) {
+      const restored = this.previousFilterId;
+      this.previousFilterId = null;
+      this.filterId = restored;
+      return;
+    }
+    this.previousFilterId = this.filterId;
+    this.filterId = id;
+    const target = this.byId(id);
+    if (target?.hidden) this.showHidden = true;
+  }
+
+  clearFilter() {
+    this.previousFilterId = null;
+    this.filterId = null;
   }
 
   // Apply a new ordering by id. Optimistically reorders the in-memory list
