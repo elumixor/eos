@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { Plus, MapPin, Link2 } from "lucide-svelte";
+  import { Capacitor } from "@capacitor/core";
   import type { Project } from "$lib/api";
   import { applyCap, toCapMode } from "$lib/capitalize";
   import { projects } from "$lib/projects.svelte";
@@ -38,6 +39,15 @@
   } = $props();
 
   let editor: HTMLDivElement | undefined = $state();
+
+  // Coarse-pointer devices (phones, tablets) have no easy way to type a
+  // newline other than Enter, so on those Enter inserts a line break instead
+  // of submitting. Desktops keep Enter-to-submit.
+  function isTouchDevice(): boolean {
+    if (typeof window === "undefined") return false;
+    if (Capacitor.isNativePlatform()) return true;
+    return !!window.matchMedia?.("(pointer: coarse)").matches;
+  }
 
   type Item =
     | { kind: "project"; project: Project }
@@ -91,18 +101,35 @@
 
   function canonical(root: Node): string {
     let out = "";
-    const walk = (node: Node) => {
+    const walk = (node: Node, depth = 0) => {
+      let first = true;
       for (const n of Array.from(node.childNodes)) {
-        if (n.nodeType === Node.TEXT_NODE) out += n.textContent ?? "";
-        else if (n instanceof HTMLElement) {
-          if (n.dataset.token) out += ` ${n.dataset.token} `;
-          else if (n.tagName === "BR") out += " ";
-          else walk(n);
+        if (n.nodeType === Node.TEXT_NODE) {
+          out += n.textContent ?? "";
+        } else if (n instanceof HTMLElement) {
+          if (n.dataset.token) {
+            out += ` ${n.dataset.token} `;
+          } else if (n.tagName === "BR") {
+            out += "\n";
+          } else {
+            // Some browsers (Chrome/Safari) wrap each line of a
+            // contenteditable in <div> or <p> blocks; treat those as line
+            // breaks so newlines survive serialization.
+            const isBlock = n.tagName === "DIV" || n.tagName === "P";
+            if (isBlock && depth === 0 && !first) out += "\n";
+            walk(n, depth + 1);
+          }
         }
+        first = false;
       }
     };
     walk(root);
-    return out.replace(/\s+/g, " ").trim();
+    // Collapse only runs of inline whitespace (spaces/tabs); keep newlines.
+    return out
+      .replace(/[ \t]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .replace(/^\n+|\n+$/g, "")
+      .trim();
   }
 
   function serialize(): string {
@@ -352,6 +379,17 @@
       return;
     }
     if (e.key === "Enter") {
+      // Touch devices: Enter is the only way to insert a newline, so let it
+      // through (preventing default would lose the keystroke). Submit is
+      // reachable via the explicit button or blur. Desktop keeps Enter=submit
+      // since users have Shift+Enter / external means to type newlines and
+      // the existing convention is Enter-to-add.
+      if (isTouchDevice()) {
+        e.preventDefault();
+        document.execCommand("insertLineBreak");
+        onInput();
+        return;
+      }
       e.preventDefault();
       submit();
       return;
