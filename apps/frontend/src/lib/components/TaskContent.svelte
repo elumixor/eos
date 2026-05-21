@@ -19,7 +19,7 @@
 </script>
 
 <span
-  class="flex-1 text-[13px] font-light tracking-wide leading-relaxed cursor-text select-none
+  class="flex-1 text-[13px] font-light tracking-wide leading-relaxed cursor-text select-none whitespace-pre-wrap break-words
     {dimmed ? 'line-through text-[var(--color-ink-3)] task-done' : 'text-[var(--color-ink)]'}"
 >
   {#each segments as seg, i (i)}

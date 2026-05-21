@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { Plus, MapPin, Link2 } from "lucide-svelte";
+  import { Capacitor } from "@capacitor/core";
   import type { Project } from "$lib/api";
   import { applyCap, toCapMode } from "$lib/capitalize";
   import { projects } from "$lib/projects.svelte";
@@ -39,6 +40,21 @@
 
   let editor: HTMLDivElement | undefined = $state();
 
+  // Phones with no physical keyboard have no easy way to type a newline other
+  // than Enter, so on those Enter inserts a line break instead of submitting.
+  // We require both `pointer: coarse` AND `hover: none` so hybrid devices
+  // (iPads with keyboards, Surface/Chromebook touch laptops, Android tablets
+  // in DeX mode) keep Enter-to-submit. Cached on mount so we don't probe
+  // matchMedia on every keystroke.
+  let touchDevice = false;
+  function detectTouchDevice(): boolean {
+    if (typeof window === "undefined") return false;
+    if (Capacitor.isNativePlatform()) return true;
+    const coarse = !!window.matchMedia?.("(pointer: coarse)").matches;
+    const noHover = !!window.matchMedia?.("(hover: none)").matches;
+    return coarse && noHover;
+  }
+
   type Item =
     | { kind: "project"; project: Project }
     | { kind: "create"; name: string }
@@ -74,6 +90,7 @@
   let qEnd = 0;
 
   onMount(() => {
+    touchDevice = detectTouchDevice();
     if (editor) editor.innerHTML = renderEditorHtml(value, projects.list);
     if (autofocus) focusEnd();
   });
@@ -93,16 +110,33 @@
     let out = "";
     const walk = (node: Node) => {
       for (const n of Array.from(node.childNodes)) {
-        if (n.nodeType === Node.TEXT_NODE) out += n.textContent ?? "";
-        else if (n instanceof HTMLElement) {
-          if (n.dataset.token) out += ` ${n.dataset.token} `;
-          else if (n.tagName === "BR") out += " ";
-          else walk(n);
+        if (n.nodeType === Node.TEXT_NODE) {
+          out += n.textContent ?? "";
+        } else if (n instanceof HTMLElement) {
+          if (n.dataset.token) {
+            out += ` ${n.dataset.token} `;
+          } else if (n.tagName === "BR") {
+            out += "\n";
+          } else {
+            // Browsers (Chrome/Safari) wrap each line of a contenteditable
+            // in <div> or <p> blocks, sometimes nested after edits or paste
+            // from Word. Treat any block boundary as a newline so nested
+            // newlines aren't silently dropped.
+            const isBlock = n.tagName === "DIV" || n.tagName === "P";
+            if (isBlock && out.length > 0 && !out.endsWith("\n")) out += "\n";
+            walk(n);
+          }
         }
       }
     };
     walk(root);
-    return out.replace(/\s+/g, " ").trim();
+    // Collapse only runs of inline whitespace (spaces/tabs); keep newlines.
+    // trim() removes leading/trailing \n as well as spaces.
+    return out
+      .replace(/​/g, "")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ ?\n ?/g, "\n")
+      .trim();
   }
 
   function serialize(): string {
@@ -352,6 +386,23 @@
       return;
     }
     if (e.key === "Enter") {
+      // IMEs (Japanese/Chinese/Korean) commit candidates with Enter. Don't
+      // hijack those keystrokes — let the composition complete normally.
+      if (e.isComposing || e.keyCode === 229) return;
+      // Touch phones: Enter inserts a newline (no other easy way). Submit is
+      // reachable via the explicit button or blur. Desktop/hybrid devices
+      // keep Enter=submit since they have Shift+Enter or external newline
+      // input methods.
+      if (touchDevice) {
+        e.preventDefault();
+        // insertLineBreak is deprecated and a no-op in some mobile WebViews
+        // (Firefox mobile). Fall back to insertHTML so we never lose the
+        // keystroke after preventDefault.
+        const ok = document.execCommand("insertLineBreak");
+        if (!ok) document.execCommand("insertHTML", false, "<br>");
+        onInput();
+        return;
+      }
       e.preventDefault();
       submit();
       return;

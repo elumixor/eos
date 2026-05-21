@@ -6,6 +6,16 @@ import { fmtDateTime, fmtDuration, fmtLinkLabel, parseSegments, type Segment } f
 const esc = (s: string) =>
   s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
 
+// Editor-only escape: like `esc` but also turns `\n` into `<br>` so newlines
+// from saved task text render correctly inside the contenteditable. A
+// trailing `<br>` in Chrome/Safari contenteditable renders as a zero-height
+// line the caret can't land on, so we append a ZWSP to give the caret a
+// valid landing position.
+const escEditor = (s: string) => {
+  const html = esc(s).replace(/\n/g, "<br>");
+  return html.endsWith("<br>") ? `${html}​` : html;
+};
+
 const CLOCK = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`;
 const HOURGLASS = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12M6 21h12M7 3c0 5 5 6 5 9s-5 4-5 9M17 3c0 5-5 6-5 9s5 4 5 9"/></svg>`;
 const MAPPIN = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
@@ -65,7 +75,7 @@ export function pillElement(seg: Segment, atSentenceStart = true): string {
 export function renderEditorHtml(text: string, projects: Project[]): string {
   const segs = parseSegments(text, projects);
   const flags = sentenceStartFlags(segs);
-  return segs.map((s, i) => (s.kind === "text" ? esc(s.value) : pillElement(s, flags[i]))).join("");
+  return segs.map((s, i) => (s.kind === "text" ? escEditor(s.value) : pillElement(s, flags[i]))).join("");
 }
 
 export { pillClass, pillInner };
