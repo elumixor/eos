@@ -539,6 +539,7 @@
           value={task.text}
           autofocus
           submitOnBlur
+          flush
           placeholder="Edit task"
           onsubmit={commitEdit}
           onTabNav={navigateTab}
