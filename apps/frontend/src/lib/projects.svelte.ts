@@ -4,10 +4,14 @@ class ProjectsStore {
   list = $state<Project[]>([]);
   filterId = $state<string | null>(null);
   showHidden = $state(false);
+  // Bumped whenever an in-task pill tap requests a scroll. FilterBar's
+  // $effect keys off this so chip-row toggles never yank the bar.
+  scrollRequestTick = $state(0);
   // What `filterId` was before a task-pill tap activated the current filter.
   // Re-tapping the same in-task pill restores it ("peek and pop"). Only set
   // via `setFilterFromTask`; the chip-row `toggleFilter` keeps plain toggle
-  // semantics so the existing FilterBar UX doesn't change.
+  // semantics so the existing FilterBar UX doesn't change. Intentionally
+  // non-reactive — never rendered, only read inside the setter branch.
   private previousFilterId: string | null = null;
 
   get visible(): Project[] {
@@ -82,20 +86,28 @@ class ProjectsStore {
 
   // Called when a `@project` pill inside a task is tapped. Switches the
   // active filter to that project while remembering the prior filter so a
-  // second tap on the same in-task pill pops back. If the targeted project
-  // is hidden, also reveal the hidden chips so the user has a visible
-  // affordance for what's filtered and how to undo it.
+  // second tap on the same in-task pill pops back. If the same pill is
+  // tapped again but no prior filter exists to pop to (e.g., the user
+  // activated the filter from the chip row first), leave state alone — the
+  // user's gesture is "focus this" not "drop the filter" — and just
+  // re-request the scroll. If the targeted project is hidden, also reveal
+  // the hidden chips so the active chip + Clear button remain reachable.
+  // The reveal is intentionally sticky; a later `clearFilter()` doesn't
+  // re-hide, because the user just exposed those projects deliberately.
   setFilterFromTask(id: string) {
     if (this.filterId === id) {
-      const restored = this.previousFilterId;
-      this.previousFilterId = null;
-      this.filterId = restored;
-      return;
+      if (this.previousFilterId !== null) {
+        const restored = this.previousFilterId;
+        this.previousFilterId = null;
+        this.filterId = restored;
+      }
+    } else {
+      this.previousFilterId = this.filterId;
+      this.filterId = id;
+      const target = this.byId(id);
+      if (target?.hidden) this.showHidden = true;
     }
-    this.previousFilterId = this.filterId;
-    this.filterId = id;
-    const target = this.byId(id);
-    if (target?.hidden) this.showHidden = true;
+    this.scrollRequestTick++;
   }
 
   clearFilter() {

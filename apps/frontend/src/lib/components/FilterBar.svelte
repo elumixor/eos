@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { X, Settings2, Eye, EyeOff } from "lucide-svelte";
   import type { Project } from "$lib/api";
   import { applyCap, toCapMode } from "$lib/capitalize";
@@ -10,19 +11,17 @@
   let editing = $state<Project | null>(null);
   let barEl: HTMLDivElement | undefined = $state();
 
-  // When the active filter changes, bring the FilterBar itself to the top
-  // of the viewport so the filtered tasks immediately below it are visible,
-  // and center the active chip horizontally inside the (overflow-x scroll)
-  // bar so the user can see which project is filtered and find the Clear
-  // affordance. The bar is rendered above the task sections in +page.svelte,
-  // so scrolling it to the top reveals the relevant section content as
-  // required by the issue acceptance.
+  // Scroll the bar + active chip into view on in-task-pill taps only.
   $effect(() => {
-    const id = projects.filterId;
-    if (!id || !barEl) return;
-    barEl.scrollIntoView({ behavior: "smooth", block: "start" });
-    const chip = barEl.querySelector<HTMLElement>(`[data-chip-id="${CSS.escape(id)}"]`);
-    chip?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    const tick = projects.scrollRequestTick;
+    if (tick === 0) return;
+    untrack(() => {
+      const id = projects.filterId;
+      if (!id || !barEl) return;
+      barEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      const chip = barEl.querySelector<HTMLElement>(`[data-chip-id="${CSS.escape(id)}"]`);
+      chip?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    });
   });
 
   // Portal menus/overlays out of the bar (which uses overflow-x-auto and
