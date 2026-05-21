@@ -14,7 +14,7 @@
 
   function filterByProject(e: MouseEvent, id: string) {
     e.stopPropagation();
-    projects.toggleFilter(id);
+    projects.setFilterFromTask(id);
   }
 </script>
 

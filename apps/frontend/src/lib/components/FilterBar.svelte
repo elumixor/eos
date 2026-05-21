@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { X, Settings2, Eye, EyeOff } from "lucide-svelte";
   import type { Project } from "$lib/api";
   import { applyCap, toCapMode } from "$lib/capitalize";
@@ -9,6 +10,19 @@
 
   let editing = $state<Project | null>(null);
   let barEl: HTMLDivElement | undefined = $state();
+
+  // Scroll the bar + active chip into view on in-task-pill taps only.
+  $effect(() => {
+    const tick = projects.scrollRequestTick;
+    if (tick === 0) return;
+    untrack(() => {
+      const id = projects.filterId;
+      if (!id || !barEl) return;
+      barEl.scrollIntoView({ behavior: "smooth", block: "start" });
+      const chip = barEl.querySelector<HTMLElement>(`[data-chip-id="${CSS.escape(id)}"]`);
+      chip?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    });
+  });
 
   // Portal menus/overlays out of the bar (which uses overflow-x-auto and
   // would otherwise crop them).
@@ -271,7 +285,7 @@
 
     {#if projects.filterId}
       <button
-        onclick={() => (projects.filterId = null)}
+        onclick={() => projects.clearFilter()}
         class="flex items-center gap-1 pl-2.5 pr-3 py-1.5 rounded-full text-[12px] font-medium shrink-0
           text-[var(--color-ink-3)] hover:text-[var(--color-ink)] transition-colors"
       >
