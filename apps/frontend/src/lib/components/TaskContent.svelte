@@ -58,7 +58,7 @@
         onpointerup={(e) => e.stopPropagation()}
       >
         <MapPin size={11} strokeWidth={2.5} />
-        {seg.name}
+        <span class="pill-place-name" title={seg.name}>{seg.name}</span>
       </a>
     {:else if seg.kind === "link"}
       <a
