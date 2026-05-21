@@ -160,9 +160,11 @@
       const updated = await api.tasks(id).$patch({ completed: target });
       if (toggleSeq.get(id) !== seq) return; // superseded by a newer tap
       tasks = tasks.map((t) => (t.id === updated.id ? updated : t));
+      toggleSeq.delete(id);
     } catch {
       if (toggleSeq.get(id) !== seq) return; // newer tap is authoritative
       tasks = tasks.map((t) => (t.id === id ? { ...t, completed: prev } : t));
+      toggleSeq.delete(id);
       toasts.error("Couldn't update task — please try again");
     }
   }

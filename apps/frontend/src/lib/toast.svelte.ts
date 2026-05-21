@@ -13,11 +13,12 @@ let nextId = 0;
 
 class ToastStore {
   items = $state<Toast[]>([]);
+  private timers = new Map<number, ReturnType<typeof setTimeout>>();
 
   show(message: string, kind: ToastKind = "info", ms = 3000) {
     const id = ++nextId;
     this.items = [...this.items, { id, message, kind }];
-    if (ms > 0) setTimeout(() => this.dismiss(id), ms);
+    if (ms > 0) this.timers.set(id, setTimeout(() => this.dismiss(id), ms));
     return id;
   }
 
@@ -26,6 +27,11 @@ class ToastStore {
   }
 
   dismiss(id: number) {
+    const timer = this.timers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(id);
+    }
     this.items = this.items.filter((t) => t.id !== id);
   }
 }
