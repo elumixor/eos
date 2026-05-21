@@ -441,7 +441,7 @@
     data-placeholder={placeholder}
     class={flush
       ? "rich-input text-[13px] font-light tracking-wide leading-relaxed focus:outline-none"
-      : "rich-input min-h-[46px] px-4 py-3 rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300"}
+      : "rich-input min-h-[46px] px-4 py-3 rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide leading-[1.7] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300"}
     oninput={onInput}
     onkeydown={onKeydown}
     oncopy={onCopy}
