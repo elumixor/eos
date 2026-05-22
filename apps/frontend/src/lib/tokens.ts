@@ -389,7 +389,9 @@ export function addDays(s: string, n: number): string {
   return localISO(d, false);
 }
 
-// Inclusive day count of a resolved range.
+// Inclusive day count of a resolved range. `Math.round` is a DST guard so
+// 23/25-hour days don't round the wrong way; do not "simplify" to integer
+// division.
 export function rangeSize(r: { start: string; end: string }): number {
   const a = fromISO(r.start);
   const b = fromISO(r.end);

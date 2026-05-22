@@ -55,7 +55,8 @@
   // Bucket each task into exactly one range section: the tightest (smallest)
   // range containing its effective date. Tasks shown in the Daily section are
   // excluded so the time-bucket sections are mutually exclusive with it too.
-  // Ties on size break by section order (the first matching section wins).
+  // Ties on range size break deterministically on section id so reordering
+  // sections (a user-facing action) doesn't reshuffle which one owns a task.
   const rangeBuckets = $derived.by(() => {
     const resolved = sections.list.map((s) => ({ id: s.id, range: resolveRange(s) }));
     const sizes = new Map(resolved.map((r) => [r.id, rangeSize(r.range)]));
@@ -68,7 +69,7 @@
       for (const r of resolved) {
         if (!inRange(d, r.range)) continue;
         const sz = sizes.get(r.id) ?? Number.POSITIVE_INFINITY;
-        if (sz < winnerSize) {
+        if (sz < winnerSize || (sz === winnerSize && winner && r.id < winner.id)) {
           winner = r;
           winnerSize = sz;
         }
@@ -97,11 +98,15 @@
     }
   }
 
-  // Resolve a drop target list id into the new effective date. For multi-day
-  // sections containing today, we pick the earliest non-today date in the
-  // range so the task lands in the section rather than falling through to the
-  // Daily section (sections are mutually exclusive with Daily). Single-day
-  // sections whose only date is today keep today.
+  // Resolve a drop target list id into the new effective date.
+  // Task.date is a single YYYY-MM-DD, not a true range — section membership
+  // is decided by whether that single date falls inside the section's range.
+  // So when dropping into a multi-day section we just need to pick *some*
+  // date in the range that won't be claimed by the Daily section (which
+  // would defeat the drop intent). We prefer tomorrow when it's inside the
+  // range, then fall back to the next in-range non-today date, then to
+  // today as a last resort. Past-only ranges use their last day so the task
+  // is not silently pushed further back than the user can see in Daily.
   function targetDate(to: string): string | null {
     if (to.startsWith("daily:")) return to.slice("daily:".length);
     if (to.startsWith("section:")) {
@@ -109,9 +114,11 @@
       if (!s) return null;
       const r = resolveRange(s);
       const today = localISO(new Date(), false);
-      if (today < r.start || today > r.end) return r.start;
+      if (today < r.start) return r.start;
+      if (today > r.end) return r.end;
       if (r.start === r.end) return today;
-      return r.start === today ? addDays(today, 1) : r.start;
+      const next = addDays(today, 1);
+      return next <= r.end ? next : today;
     }
     return null; // "unscheduled"
   }
