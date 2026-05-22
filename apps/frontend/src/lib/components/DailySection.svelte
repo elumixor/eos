@@ -88,8 +88,10 @@
     const ax = Math.abs(dx);
     const ay = Math.abs(dy);
     if (ax < AXIS_LOCK_PX && ay < AXIS_LOCK_PX) return;
-    // Whichever axis crosses the threshold first wins. Require horizontal to
-    // be clearly dominant to avoid hijacking a near-vertical swipe.
+    // Dominance check at the first sample past AXIS_LOCK_PX: horizontal must
+    // beat vertical by 1.2× to commit to "swipe", otherwise the gesture is
+    // treated as a scroll. Not a strict "first axis across the line" race —
+    // both axes are sampled at once and the larger one (with bias) wins.
     swipeLock = ax > ay * 1.2 ? "swipe" : "scroll";
   }
   function onPointerUp(e: PointerEvent) {
