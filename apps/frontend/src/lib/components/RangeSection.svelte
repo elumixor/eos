@@ -6,6 +6,9 @@
   import SectionShell from "./SectionShell.svelte";
   import TaskList from "./TaskList.svelte";
 
+  // `tasks` MUST be the section's pre-bucketed list (mutually exclusive
+  // across range sections + already excludes the Daily-selected date).
+  // The parent owns that filtering; this component just sorts and renders.
   let {
     section,
     tasks,
