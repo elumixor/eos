@@ -118,7 +118,10 @@
       if (today > r.end) return r.end;
       if (r.start === r.end) return today;
       const next = addDays(today, 1);
-      return next <= r.end ? next : today;
+      if (next <= r.end) return next;
+      // Boundary case: today is the last day of a multi-day range. Step back
+      // one day so the task lands in this section instead of Daily.
+      return addDays(today, -1);
     }
     return null; // "unscheduled"
   }
