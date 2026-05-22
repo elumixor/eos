@@ -117,6 +117,14 @@
 
   let tx = $state(0); // foreground card translateX
   let settling = $state(false); // enables the CSS transition while snapping
+
+  // Spark-style progress signals — derived from tx so they update every frame
+  // the gesture moves. `*Progress` is 0→1 over the peek distance (icon fade);
+  // `armed` flips to ±1 once the swipe crosses the auto-fire threshold so the
+  // panel can flash brighter as a "release will commit" cue.
+  const leftProgress = $derived(Math.min(1, Math.max(0, tx) / PEEK_LEFT));
+  const rightProgress = $derived(Math.min(1, Math.max(0, -tx) / PEEK_RIGHT));
+  const armed = $derived(zoneOf(tx) === 2 ? Math.sign(tx) : 0);
   type Lock = null | "swipe" | "scroll" | "reorder";
   let lock: Lock = null;
   let active = false; // a pointer is currently down on this row
@@ -497,7 +505,7 @@
   -->
   <div
     bind:this={cardEl}
-    class="flex w-[220%] {settling ? 'transition-transform duration-200' : ''}"
+    class="flex w-[220%] {settling ? 'transition-transform duration-[260ms] [transition-timing-function:cubic-bezier(0.34,1.3,0.5,1)]' : ''}"
     style="transform: translateX(calc(-{LEFT_PCT}% + {tx}px)); touch-action: pan-y;"
     role="textbox"
     tabindex="0"
@@ -514,11 +522,15 @@
       onclick={tapComplete}
       tabindex={-1}
       aria-label={task.completed ? "Mark incomplete" : "Mark complete"}
-      class="shrink-0 flex items-center justify-end"
+      class="shrink-0 flex items-center justify-end transition-[filter] duration-150"
       style="width: {LEFT_PCT}%;
-        background: {task.completed ? 'var(--color-surface-3)' : 'var(--color-accent)'}"
+        background: {task.completed ? 'var(--color-surface-3)' : 'var(--color-accent)'};
+        filter: brightness({armed > 0 ? 1.18 : 1});"
     >
-      <div class="h-full flex items-center justify-center" style="width: {ICON_W}px">
+      <div
+        class="h-full flex items-center justify-center transition-transform duration-150"
+        style="width: {ICON_W}px; opacity: {leftProgress}; transform: scale({0.6 + 0.4 * leftProgress + (armed > 0 ? 0.12 : 0)});"
+      >
         {#if task.completed}
           <Undo2 size={18} class="text-[var(--color-ink)]" />
         {:else}
@@ -556,8 +568,8 @@
          card). The Delete button stretches to fill the rest of the 60%
          panel so a longer swipe just reveals more red. -->
     <div
-      class="shrink-0 flex bg-[var(--color-danger)]"
-      style="width: {LEFT_PCT}%"
+      class="shrink-0 flex bg-[var(--color-danger)] transition-[filter] duration-150"
+      style="width: {LEFT_PCT}%; filter: brightness({armed < 0 ? 1.18 : 1});"
     >
       <button
         onclick={openOptions}
@@ -566,7 +578,12 @@
         class="h-full shrink-0 flex items-center justify-center bg-[var(--color-voice)] text-[var(--color-bg)]"
         style="width: {ICON_W}px"
       >
-        <MoreHorizontal size={18} />
+        <div
+          class="flex items-center justify-center transition-transform duration-150"
+          style="opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress});"
+        >
+          <MoreHorizontal size={18} />
+        </div>
       </button>
       <button
         onclick={deleteFromTray}
@@ -574,7 +591,10 @@
         aria-label="Delete"
         class="flex-1 h-full flex items-center justify-start text-white"
       >
-        <div class="h-full flex items-center justify-center" style="width: {ICON_W}px">
+        <div
+          class="h-full flex items-center justify-center transition-transform duration-150"
+          style="width: {ICON_W}px; opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress + (armed < 0 ? 0.12 : 0)});"
+        >
           <Trash2 size={18} />
         </div>
       </button>
