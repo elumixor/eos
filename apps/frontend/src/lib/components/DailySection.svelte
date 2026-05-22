@@ -65,15 +65,20 @@
   let swipeY = 0;
   let swipeLock: SwipeLock = null;
   let swiping = false;
+  let swipePointerId: number | null = null;
   function onPointerDown(e: PointerEvent) {
     if (dnd.active || e.pointerType !== "touch") return;
+    // Already tracking another finger — ignore the new pointer entirely so a
+    // second touch can't rewrite the origin mid-swipe.
+    if (swiping) return;
+    swipePointerId = e.pointerId;
     swipeX = e.clientX;
     swipeY = e.clientY;
     swipeLock = null;
     swiping = true;
   }
   function onPointerMove(e: PointerEvent) {
-    if (!swiping || swipeLock !== null) return;
+    if (!swiping || e.pointerId !== swipePointerId || swipeLock !== null) return;
     const dx = e.clientX - swipeX;
     const dy = e.clientY - swipeY;
     const ax = Math.abs(dx);
@@ -84,17 +89,20 @@
     swipeLock = ax > ay * 1.2 ? "swipe" : "scroll";
   }
   function onPointerUp(e: PointerEvent) {
-    if (!swiping) return;
+    if (!swiping || e.pointerId !== swipePointerId) return;
     const lock = swipeLock;
     swiping = false;
     swipeLock = null;
+    swipePointerId = null;
     if (lock !== "swipe") return;
     const dx = e.clientX - swipeX;
     if (Math.abs(dx) > COMMIT_PX) shift(dx < 0 ? 1 : -1);
   }
-  function onPointerCancel() {
+  function onPointerCancel(e: PointerEvent) {
+    if (e.pointerId !== swipePointerId) return;
     swiping = false;
     swipeLock = null;
+    swipePointerId = null;
   }
 </script>
 
