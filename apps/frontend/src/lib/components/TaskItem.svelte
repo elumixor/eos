@@ -528,7 +528,7 @@
         filter: brightness({armed > 0 ? 1.18 : 1});"
     >
       <div
-        class="h-full flex items-center justify-center transition-transform duration-150"
+        class="h-full flex items-center justify-center"
         style="width: {ICON_W}px; opacity: {leftProgress}; transform: scale({0.6 + 0.4 * leftProgress + (armed > 0 ? 0.12 : 0)});"
       >
         {#if task.completed}
@@ -568,8 +568,8 @@
          card). The Delete button stretches to fill the rest of the 60%
          panel so a longer swipe just reveals more red. -->
     <div
-      class="shrink-0 flex bg-[var(--color-danger)] transition-[filter] duration-150"
-      style="width: {LEFT_PCT}%; filter: brightness({armed < 0 ? 1.18 : 1});"
+      class="shrink-0 flex bg-[var(--color-danger)]"
+      style="width: {LEFT_PCT}%"
     >
       <button
         onclick={openOptions}
@@ -579,7 +579,7 @@
         style="width: {ICON_W}px"
       >
         <div
-          class="flex items-center justify-center transition-transform duration-150"
+          class="flex items-center justify-center"
           style="opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress});"
         >
           <MoreHorizontal size={18} />
@@ -589,10 +589,11 @@
         onclick={deleteFromTray}
         tabindex={-1}
         aria-label="Delete"
-        class="flex-1 h-full flex items-center justify-start text-white"
+        class="flex-1 h-full flex items-center justify-start text-white transition-[filter] duration-150"
+        style="filter: brightness({armed < 0 ? 1.18 : 1});"
       >
         <div
-          class="h-full flex items-center justify-center transition-transform duration-150"
+          class="h-full flex items-center justify-center"
           style="width: {ICON_W}px; opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress + (armed < 0 ? 0.12 : 0)});"
         >
           <Trash2 size={18} />
