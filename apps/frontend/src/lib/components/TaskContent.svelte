@@ -55,7 +55,6 @@
         rel="noopener noreferrer"
         onclick={(e) => e.stopPropagation()}
         onpointerdown={(e) => e.stopPropagation()}
-        onpointerup={(e) => e.stopPropagation()}
       >
         <MapPin size={11} strokeWidth={2.5} />
         <span class="pill-place-name" title={seg.name}>{seg.name}</span>
@@ -68,7 +67,6 @@
         rel="noopener noreferrer"
         onclick={(e) => e.stopPropagation()}
         onpointerdown={(e) => e.stopPropagation()}
-        onpointerup={(e) => e.stopPropagation()}
       >
         <Link2 size={11} strokeWidth={2.5} />
         {fmtLinkLabel(seg.url)}

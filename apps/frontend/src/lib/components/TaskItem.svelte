@@ -135,6 +135,12 @@
   type Lock = null | "swipe" | "scroll" | "reorder";
   let lock: Lock = null;
   let active = false; // a pointer is currently down on this row
+  // True only after a pointerdown that wasn't filtered out (side-panel button,
+  // editing mode, secondary button). Without this gate, a pointerup that
+  // bubbles up from a sibling layer — for example after a backdrop close —
+  // would fall into the tap-to-edit branch using `startX`/`lastX` from a
+  // prior gesture, where `moved` evaluates to false and `startEdit` fires.
+  let hadDown = false;
   let startX = 0;
   let startY = 0;
   let lastX = 0;
@@ -215,6 +221,7 @@
     // the swipe pipeline — let the button receive its click cleanly.
     if (mainEl && !mainEl.contains(e.target as Node)) return;
     active = true;
+    hadDown = true;
     lock = null;
     startX = lastX = e.clientX;
     startY = lastY = e.clientY;
@@ -309,12 +316,14 @@
   }
 
   function onUp(e: PointerEvent) {
+    const wasDown = hadDown;
     active = false;
+    hadDown = false;
     clearLp();
     cardEl?.releasePointerCapture?.(e.pointerId);
     if (lock === "swipe") {
       settle();
-    } else if (lock === null) {
+    } else if (lock === null && wasDown) {
       const moved = Math.abs(lastX - startX) > 6 || Math.abs(lastY - startY) > 6;
       if (!moved) {
         if (tx !== 0) {
@@ -335,9 +344,19 @@
 
   function onCancel(e: PointerEvent) {
     active = false;
+    hadDown = false;
     clearLp();
     cardEl?.releasePointerCapture?.(e.pointerId);
-    if (lock === "swipe") settle();
+    // pointercancel can come from a system interruption (notification,
+    // browser-back swipe) or, occasionally, from the end of a fast user
+    // flick. Either way auto-firing delete/complete is the wrong default —
+    // we'd rather drop the action and let the user retry than nuke a task
+    // on a flick they didn't realise had crossed the trigger. A light tap
+    // acknowledges the dropped gesture so it doesn't feel silent.
+    if (lock === "swipe" && tx !== 0) {
+      closeTray();
+      tapLight();
+    }
     lock = null;
   }
 
@@ -615,11 +634,15 @@
 
 {#if menuOpen}
   <div use:portal>
-    <!-- Backdrop closes the menu on any outside interaction -->
+    <!-- Backdrop closes the menu on any outside interaction. We close on
+         click (and absorb both pointer phases) so the gesture is consumed
+         in full before the now-uncovered element below can see its tail. -->
     <button
       aria-label="Close menu"
       class="fixed inset-0 z-40 cursor-default"
-      onpointerdown={() => (menuOpen = false)}
+      onpointerdown={(e) => e.stopPropagation()}
+      onpointerup={(e) => e.stopPropagation()}
+      onclick={() => (menuOpen = false)}
     ></button>
     <div
       bind:this={menuEl}

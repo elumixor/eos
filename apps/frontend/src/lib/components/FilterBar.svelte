@@ -352,7 +352,9 @@
     <button
       aria-label="Close menu"
       class="fixed inset-0 z-40 cursor-default"
-      onpointerdown={() => (menuOpen = false)}
+      onpointerdown={(e) => e.stopPropagation()}
+      onpointerup={(e) => e.stopPropagation()}
+      onclick={() => (menuOpen = false)}
     ></button>
     <div
       bind:this={menuEl}
