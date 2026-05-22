@@ -73,15 +73,11 @@ class Dnd {
     document.documentElement.classList.add("dnd-dragging");
     selectionStart();
     window.addEventListener("pointermove", this.move, { passive: false });
-    window.addEventListener("pointerup", this.end);
-    window.addEventListener("pointercancel", this.end);
+    window.addEventListener("pointerup", this.endDrop);
+    window.addEventListener("pointercancel", this.cancelDrop);
     // Recompute the drop slot immediately so a drag that starts already over
     // a valid index isn't misreported as "before slot 0" until the next move.
-    this.scheduleFlush();
-    // Auto-scroll runs on its own rAF loop so the page can keep scrolling
-    // even when the finger isn't moving — held near an edge.
-    this.lastScrollTs = performance.now();
-    this.scrollRafId = requestAnimationFrame(this.autoScroll);
+    this.recomputeDropSlot();
   }
 
   private scheduleFlush() {
@@ -98,6 +94,10 @@ class Dnd {
     this.pendingX = ev.clientX;
     this.pendingY = ev.clientY;
     this.scheduleFlush();
+    // Only spin the auto-scroll rAF while the finger is actually inside an
+    // edge zone — running it every frame for the duration of every drag is
+    // wasted work on low-end devices.
+    if (this.inEdgeZone(ev.clientY)) this.startAutoScroll();
   };
 
   private flush = () => {
@@ -145,19 +145,34 @@ class Dnd {
     if (this.overList !== prevList || this.overIndex !== prevIndex) selection();
   }
 
-  // Edge auto-scroll. Runs every frame for the duration of the drag so the
-  // page keeps scrolling even when the finger is held still inside an edge
-  // zone — that's the whole point: you can reach off-screen drop targets
-  // without lifting your finger.
+  // Use the visualViewport when available — iOS Safari's URL bar collapses
+  // and expands during scroll, and `innerHeight` lags the actual visible
+  // area during the transition. The visualViewport reflects what the user
+  // can really see, which is what "near the edge" should mean.
+  private viewportHeight() {
+    return window.visualViewport?.height ?? window.innerHeight;
+  }
+
+  private inEdgeZone(y: number) {
+    return y < EDGE_ZONE || y > this.viewportHeight() - EDGE_ZONE;
+  }
+
+  private startAutoScroll() {
+    if (this.scrollRafId) return;
+    this.lastScrollTs = performance.now();
+    this.scrollRafId = requestAnimationFrame(this.autoScroll);
+  }
+
+  // Edge auto-scroll. Self-arms only while the finger is inside an edge zone
+  // (gated by `startAutoScroll`); exits the loop as soon as the finger
+  // leaves the zone so we don't spin a rAF for the entire drag.
   private autoScroll = (ts: number) => {
-    if (!this.active) {
-      this.scrollRafId = 0;
-      return;
-    }
+    this.scrollRafId = 0;
+    if (!this.active) return;
     const dtMs = Math.min(64, ts - this.lastScrollTs);
     this.lastScrollTs = ts;
 
-    const vh = window.innerHeight;
+    const vh = this.viewportHeight();
     const y = this.pendingY;
     let dy = 0;
     if (y < EDGE_ZONE) {
@@ -168,19 +183,35 @@ class Dnd {
       dy = EDGE_MAX_SPEED * Math.min(1, Math.max(0, f));
     }
 
-    if (dy !== 0) {
-      // Normalise speed to 60fps so a janky frame doesn't undershoot.
-      window.scrollBy(0, dy * (dtMs / 16.67));
-      // The list element under the finger may now be different — the drop
-      // slot needs to follow the moving viewport even though pendingX/Y
-      // haven't changed.
-      this.recomputeDropSlot();
-    }
+    if (dy === 0) return; // left the zone — stop spinning
 
+    // Normalise speed to 60fps so a janky frame doesn't undershoot.
+    window.scrollBy(0, dy * (dtMs / 16.67));
+    // The list element under the finger may now be different — the drop
+    // slot needs to follow the moving viewport even though pendingX/Y
+    // haven't changed.
+    this.recomputeDropSlot();
     this.scrollRafId = requestAnimationFrame(this.autoScroll);
   };
 
-  private end = (ev: PointerEvent) => {
+  // `pointerup` → commit the drop. The pointer event carries the final
+  // coords, which we trust over the last rAF state.
+  private endDrop = (ev: PointerEvent) => {
+    this.pendingX = ev.clientX;
+    this.pendingY = ev.clientY;
+    this.recomputeDropSlot();
+    this.finish(true);
+  };
+
+  // `pointercancel` → the OS took the gesture away (e.g., a system gesture
+  // interrupted, or the touch was hijacked by a parent scroller). Discard
+  // the drop rather than commit it; an OS-cancelled drag silently
+  // reordering tasks would be a nasty surprise.
+  private cancelDrop = () => {
+    this.finish(false);
+  };
+
+  private finish(commit: boolean) {
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
       this.rafId = 0;
@@ -189,24 +220,18 @@ class Dnd {
       cancelAnimationFrame(this.scrollRafId);
       this.scrollRafId = 0;
     }
-    // Resolve the drop target from the *current* finger position rather
-    // than whatever the last rAF left behind. Otherwise a fast release
-    // after a small move can land on the previous slot.
-    this.pendingX = ev.clientX;
-    this.pendingY = ev.clientY;
-    this.recomputeDropSlot();
 
     document.documentElement.classList.remove("dnd-dragging");
     window.removeEventListener("pointermove", this.move);
-    window.removeEventListener("pointerup", this.end);
-    window.removeEventListener("pointercancel", this.end);
+    window.removeEventListener("pointerup", this.endDrop);
+    window.removeEventListener("pointercancel", this.cancelDrop);
     selectionEnd();
 
     const onDrop = this.onDrop;
     const fromList = this.fromList;
     const overList = this.overList;
-    const hadDrop = this.taskIds.length > 0 && fromList !== null && overList !== null && onDrop !== null;
-    if (hadDrop) {
+    const willDrop = commit && this.taskIds.length > 0 && fromList !== null && overList !== null && onDrop !== null;
+    if (willDrop) {
       tapMedium();
       onDrop({
         taskIds: this.taskIds.slice(),
@@ -221,12 +246,13 @@ class Dnd {
     this.overList = null;
 
     // iOS and some Androids fire a synthetic `click` on pointerup after a
-    // pointer sequence. If that click lands on the underlying task row, it
-    // toggles edit mode on the wrong item. Swallow the first click in a
-    // short window — only after a real drop, since cancelled drags don't
-    // need the suppression and we don't want to break ordinary taps.
-    if (hadDrop) suppressNextClick();
-  };
+    // pointer sequence. That click would land on whatever is under the
+    // finger at release and could (e.g.) put a task into edit mode. The
+    // synthetic click follows the pointer events within a few ms, so a
+    // tight 120ms window suffices — wider would risk eating a legitimate
+    // tap on a toolbar button.
+    if (willDrop) suppressNextClick();
+  }
 }
 
 function suppressNextClick() {
@@ -236,9 +262,7 @@ function suppressNextClick() {
     window.removeEventListener("click", swallow, true);
   };
   window.addEventListener("click", swallow, true);
-  // Safety net — drop the listener after a short window in case no click
-  // actually fires, so we don't eat an unrelated click later.
-  setTimeout(() => window.removeEventListener("click", swallow, true), 400);
+  setTimeout(() => window.removeEventListener("click", swallow, true), 120);
 }
 
 export const dnd = new Dnd();
