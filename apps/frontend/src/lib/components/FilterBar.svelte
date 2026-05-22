@@ -90,6 +90,7 @@
   let pressY = 0;
   let pressedProject: Project | null = null;
   let pressActivated = false; // true once we commit to drag or menu
+  let pressDown = false; // false once the pointer is up or cancelled
 
   // ── Drag state ──────────────────────────────────────────────────────
   let draggingId = $state<string | null>(null);
@@ -188,14 +189,27 @@
     pressX = e.clientX;
     pressY = e.clientY;
     pressActivated = false;
+    pressDown = true;
     const chip = e.currentTarget as HTMLElement;
     pressTimer = setTimeout(() => {
       pressTimer = null;
-      if (pressActivated || !pressedProject) return;
+      // If the browser cancelled the pointer (e.g. native scroll committed),
+      // pressDown is false and we must not pop the menu.
+      if (pressActivated || !pressDown || !pressedProject) return;
       pressActivated = true;
       openMenu(pressedProject, pressX, pressY);
     }, LONG_PRESS_MS);
 
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        pressTimer = null;
+      }
+      pressDown = false;
+    };
     const onMove = (me: PointerEvent) => {
       if (pressActivated) return;
       const dx = me.clientX - pressX;
@@ -203,28 +217,29 @@
       if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;
       // Commit to drag; cancel pending menu.
       pressActivated = true;
-      if (pressTimer) {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-      }
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      cleanup();
       if (pressedProject) startDrag(pressedProject, me.clientX, me.clientY, chip);
     };
     const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      if (pressTimer) {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-      }
+      const wasActivated = pressActivated;
+      const proj = pressedProject;
+      cleanup();
       // If we never activated drag or menu, this was a tap → toggle filter.
-      if (!pressActivated && pressedProject) projects.toggleFilter(pressedProject.id);
+      if (!wasActivated && proj) projects.toggleFilter(proj.id);
+      pressId = null;
+      pressedProject = null;
+    };
+    const onCancel = () => {
+      // Native scroll (or anything that cancels the pointer) preempts the
+      // gesture. Tear everything down without firing the tap or arming the
+      // menu.
+      cleanup();
       pressId = null;
       pressedProject = null;
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
   }
 </script>
 
@@ -235,6 +250,7 @@
   <div
     bind:this={barEl}
     class="flex items-center gap-2 mb-6 overflow-x-auto no-scrollbar -mx-1 px-1"
+    style="touch-action: pan-x; overscroll-behavior-x: contain;"
   >
     {#each visibleNoDrag as p, i (p.id)}
       {@const activeFilter = projects.filterId === p.id}

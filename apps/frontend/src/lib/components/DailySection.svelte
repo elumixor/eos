@@ -48,21 +48,67 @@
 
   const completedCount = $derived(tasks.filter((t) => t.completed).length);
 
-  // Horizontal swipe on the header switches days (touch + mouse).
+  // Horizontal swipe on the header switches days (touch only). Mouse users
+  // page the day with the chevrons; the swipe gesture would otherwise compete
+  // with marquee box-selection.
+  //
+  // Axis-lock state machine: on the first dominant movement past AXIS_LOCK_PX
+  // we commit to either "swipe" (horizontal — day shifts) or "scroll"
+  // (vertical — gesture ignored, page scrolls natively via touch-action:
+  // pan-y). Once committed there is no mid-gesture switching, so a vertical
+  // scroll that drifts sideways can never paginate the day, and a horizontal
+  // swipe that drifts vertically still commits the day on release.
+  const AXIS_LOCK_PX = 6; // first move past this commits the axis
+  const COMMIT_PX = 40; // total horizontal distance required to shift a day
+  type SwipeLock = null | "swipe" | "scroll";
   let swipeX = 0;
+  let swipeY = 0;
+  let swipeLock: SwipeLock = null;
   let swiping = false;
+  let swipePointerId: number | null = null;
   function onPointerDown(e: PointerEvent) {
-    // Mouse users page the day with the chevrons; the swipe gesture is for
-    // touch only (and would otherwise compete with marquee box-selection).
     if (dnd.active || e.pointerType !== "touch") return;
+    // Chevron / Today / calendar buttons are nested inside this wrapper. Their
+    // onclick stops propagation but pointerdown does not, so without this bail
+    // a touch on a chevron primes the swipe state and can commit a shift.
+    if (e.target instanceof Element && e.target.closest("button")) return;
+    // Already tracking another finger — ignore the new pointer entirely so a
+    // second touch can't rewrite the origin mid-swipe.
+    if (swiping) return;
+    swipePointerId = e.pointerId;
     swipeX = e.clientX;
+    swipeY = e.clientY;
+    swipeLock = null;
     swiping = true;
   }
-  function onPointerUp(e: PointerEvent) {
-    if (!swiping) return;
-    swiping = false;
+  function onPointerMove(e: PointerEvent) {
+    if (!swiping || e.pointerId !== swipePointerId || swipeLock !== null) return;
     const dx = e.clientX - swipeX;
-    if (Math.abs(dx) > 50) shift(dx < 0 ? 1 : -1);
+    const dy = e.clientY - swipeY;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (ax < AXIS_LOCK_PX && ay < AXIS_LOCK_PX) return;
+    // Dominance check at the first sample past AXIS_LOCK_PX: horizontal must
+    // beat vertical by 1.2× to commit to "swipe", otherwise the gesture is
+    // treated as a scroll. Not a strict "first axis across the line" race —
+    // both axes are sampled at once and the larger one (with bias) wins.
+    swipeLock = ax > ay * 1.2 ? "swipe" : "scroll";
+  }
+  function onPointerUp(e: PointerEvent) {
+    if (!swiping || e.pointerId !== swipePointerId) return;
+    const lock = swipeLock;
+    swiping = false;
+    swipeLock = null;
+    swipePointerId = null;
+    if (lock !== "swipe") return;
+    const dx = e.clientX - swipeX;
+    if (Math.abs(dx) > COMMIT_PX) shift(dx < 0 ? 1 : -1);
+  }
+  function onPointerCancel(e: PointerEvent) {
+    if (e.pointerId !== swipePointerId) return;
+    swiping = false;
+    swipeLock = null;
+    swipePointerId = null;
   }
 </script>
 
@@ -70,7 +116,9 @@
   role="group"
   aria-label="Daily tasks"
   onpointerdown={onPointerDown}
+  onpointermove={onPointerMove}
   onpointerup={onPointerUp}
+  onpointercancel={onPointerCancel}
   style="touch-action: pan-y;"
 >
   <SectionShell
