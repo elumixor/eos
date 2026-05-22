@@ -117,6 +117,13 @@
 
   let tx = $state(0); // foreground card translateX
   let settling = $state(false); // enables the CSS transition while snapping
+  // Open snaps and cancel spring-backs use a slight overshoot (Spark-like);
+  // commit-close (after auto-firing an action) uses a plain ease-out, so the
+  // strip doesn't bounce past zero and flash the opposite tray.
+  const SPRING_EASE = "cubic-bezier(0.34, 1.3, 0.5, 1)";
+  const SETTLE_EASE = "cubic-bezier(0.22, 0.61, 0.36, 1)";
+  const SETTLE_MS = 260;
+  let settleEase = $state(SPRING_EASE);
 
   // Spark-style progress signals — derived from tx so they update every frame
   // the gesture moves. `*Progress` is 0→1 over the peek distance (icon fade);
@@ -162,15 +169,16 @@
     }
   }
 
-  function animateTo(v: number) {
+  function animateTo(v: number, ease: string = SPRING_EASE) {
+    settleEase = ease;
     settling = true;
     tx = v;
     if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(() => (settling = false), 210);
+    settleTimer = setTimeout(() => (settling = false), SETTLE_MS);
   }
 
-  function closeTray() {
-    animateTo(0);
+  function closeTray(opts: { ease?: string } = {}) {
+    animateTo(0, opts.ease ?? SPRING_EASE);
     if (swipeOpen.id === task.id) swipeOpen.id = null;
   }
 
@@ -278,7 +286,7 @@
     if (tx > 0) {
       if (zone === 2) {
         handleToggle();
-        closeTray();
+        closeTray({ ease: SETTLE_EASE });
       } else if (zone === 1) {
         animateTo(PEEK_LEFT);
         swipeOpen.id = task.id;
@@ -289,7 +297,7 @@
     } else if (tx < 0) {
       if (zone === 2) {
         askDelete();
-        closeTray();
+        closeTray({ ease: SETTLE_EASE });
       } else if (zone === 1) {
         animateTo(-PEEK_RIGHT);
         swipeOpen.id = task.id;
@@ -505,8 +513,10 @@
   -->
   <div
     bind:this={cardEl}
-    class="flex w-[220%] {settling ? 'transition-transform duration-[260ms] [transition-timing-function:cubic-bezier(0.34,1.3,0.5,1)]' : ''}"
-    style="transform: translateX(calc(-{LEFT_PCT}% + {tx}px)); touch-action: pan-y;"
+    class="flex w-[220%]"
+    style="transform: translateX(calc(-{LEFT_PCT}% + {tx}px));
+      touch-action: pan-y;
+      transition: {settling ? `transform ${SETTLE_MS}ms ${settleEase}` : 'none'};"
     role="textbox"
     tabindex="0"
     onpointerdown={onDown}
