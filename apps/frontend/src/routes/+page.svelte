@@ -11,6 +11,7 @@
     effectiveDate,
     explicitDate,
     extractFields,
+    inRange,
     localISO,
     projectIds,
     resolveRange,
@@ -49,6 +50,47 @@
   const dailyTasks = $derived(visibleTasks.filter((t) => effectiveDate(t) === selectedDate));
   const unscheduledTasks = $derived(visibleTasks.filter((t) => effectiveDate(t) === null));
 
+  const sectionRanges = $derived(sections.list.map((s) => resolveRange(s)));
+
+  // Mutually-exclusive bucketing order: narrowest range wins (Today beats
+  // This Week beats This Month), regardless of the user's display order.
+  // Without this, a user who dragged "This Week" above "Today" would make
+  // today's tasks appear in This Week — violating the acceptance criteria.
+  // Tiebreak by user order so the layout stays stable across reorders.
+  function rangeDays(r: { start: string; end: string }) {
+    return (
+      (new Date(`${r.end}T12:00:00`).getTime() -
+        new Date(`${r.start}T12:00:00`).getTime()) /
+        86400000 +
+      1
+    );
+  }
+  const bucketOrder = $derived(
+    sections.list
+      .map((_, i) => i)
+      .sort((a, b) => {
+        const da = rangeDays(sectionRanges[a]);
+        const db = rangeDays(sectionRanges[b]);
+        return da === db ? a - b : da - db;
+      }),
+  );
+
+  const tasksBySection = $derived.by(() => {
+    const buckets: Record<string, Task[]> = {};
+    for (const s of sections.list) buckets[s.id] = [];
+    for (const t of visibleTasks) {
+      const d = effectiveDate(t);
+      if (d === null || d === selectedDate) continue;
+      for (const i of bucketOrder) {
+        if (inRange(d, sectionRanges[i])) {
+          buckets[sections.list[i].id].push(t);
+          break;
+        }
+      }
+    }
+    return buckets;
+  });
+
   const draggedTask = $derived(
     dnd.taskId ? tasks.find((t) => t.id === dnd.taskId) : undefined,
   );
@@ -69,14 +111,45 @@
   }
 
   // Resolve a drop target list id into the new effective date.
+  //
+  // Section drops pick the first date inside the target's range that:
+  //   (a) isn't the currently-selected Daily date — otherwise the task
+  //       stays in Daily and the drag is a visual no-op;
+  //   (b) isn't covered by a *narrower* section, since bucketing assigns
+  //       the task to that narrower section instead of the drop target;
+  //   (c) isn't in the past — widening "Today" to "This Week" on a
+  //       Wednesday must not move the task to Monday.
+  // Returns null if no such date exists; callers treat null as "cancel
+  // the drop" rather than silently land on an off-target date.
   function targetDate(to: string): string | null {
     if (to.startsWith("daily:")) return to.slice("daily:".length);
     if (to.startsWith("section:")) {
-      const s = sections.byId(to.slice("section:".length));
-      if (!s) return null;
-      const r = resolveRange(s);
+      const id = to.slice("section:".length);
+      const idx = sections.list.findIndex((s) => s.id === id);
+      if (idx < 0) return null;
+      const r = sectionRanges[idx];
+      const rank = bucketOrder.indexOf(idx);
+      const narrower = bucketOrder
+        .slice(0, rank < 0 ? 0 : rank)
+        .map((i) => sectionRanges[i]);
       const today = localISO(new Date(), false);
-      return today >= r.start && today <= r.end ? today : r.start;
+      const floor = today > selectedDate ? today : selectedDate;
+
+      const start = new Date(`${r.start}T12:00:00`);
+      const end = new Date(`${r.end}T12:00:00`);
+      const cursor = new Date(start);
+      let pastOnly: string | null = null;
+      while (cursor.getTime() <= end.getTime()) {
+        const d = localISO(cursor, false);
+        cursor.setDate(cursor.getDate() + 1);
+        if (d === selectedDate) continue;
+        if (narrower.some((er) => inRange(d, er))) continue;
+        if (d >= floor) return d;
+        if (pastOnly === null) pastOnly = d;
+      }
+      // Fall back to a past date only if the entire range is in the past
+      // (e.g. an absolute "Last week" section).
+      return pastOnly;
     }
     return null; // "unscheduled"
   }
@@ -100,6 +173,10 @@
     if (dragged.length === 0) return;
 
     const newDate = targetDate(to);
+    // Section drop with no viable date (e.g. range is just `selectedDate`
+    // and fully covered by narrower sections) → cancel the drop rather
+    // than silently landing somewhere unhelpful.
+    if (to.startsWith("section:") && newDate === null) return;
     const writes: Array<{ id: string; text: string }> = [];
     for (const task of dragged) {
       const hadChip = explicitDate(task.text) !== null;
@@ -304,8 +381,7 @@
         <div class="border-t border-[var(--color-border)] mx-8"></div>
         <RangeSection
           {section}
-          tasks={visibleTasks}
-          excludeDate={selectedDate}
+          tasks={tasksBySection[section.id] ?? []}
           onEditSection={(s) => (editorFor = { section: s })}
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}
