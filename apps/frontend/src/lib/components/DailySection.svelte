@@ -48,21 +48,53 @@
 
   const completedCount = $derived(tasks.filter((t) => t.completed).length);
 
-  // Horizontal swipe on the header switches days (touch + mouse).
+  // Horizontal swipe on the header switches days (touch only). Mouse users
+  // page the day with the chevrons; the swipe gesture would otherwise compete
+  // with marquee box-selection.
+  //
+  // Axis-lock state machine: on the first dominant movement past AXIS_LOCK_PX
+  // we commit to either "swipe" (horizontal — day shifts) or "scroll"
+  // (vertical — gesture ignored, page scrolls natively via touch-action:
+  // pan-y). Once committed there is no mid-gesture switching, so a vertical
+  // scroll that drifts sideways can never paginate the day, and a horizontal
+  // swipe that drifts vertically still commits the day on release.
+  const AXIS_LOCK_PX = 6; // first move past this commits the axis
+  const COMMIT_PX = 40; // total horizontal distance required to shift a day
+  type SwipeLock = null | "swipe" | "scroll";
   let swipeX = 0;
+  let swipeY = 0;
+  let swipeLock: SwipeLock = null;
   let swiping = false;
   function onPointerDown(e: PointerEvent) {
-    // Mouse users page the day with the chevrons; the swipe gesture is for
-    // touch only (and would otherwise compete with marquee box-selection).
     if (dnd.active || e.pointerType !== "touch") return;
     swipeX = e.clientX;
+    swipeY = e.clientY;
+    swipeLock = null;
     swiping = true;
+  }
+  function onPointerMove(e: PointerEvent) {
+    if (!swiping || swipeLock !== null) return;
+    const dx = e.clientX - swipeX;
+    const dy = e.clientY - swipeY;
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (ax < AXIS_LOCK_PX && ay < AXIS_LOCK_PX) return;
+    // Whichever axis crosses the threshold first wins. Require horizontal to
+    // be clearly dominant to avoid hijacking a near-vertical swipe.
+    swipeLock = ax > ay * 1.2 ? "swipe" : "scroll";
   }
   function onPointerUp(e: PointerEvent) {
     if (!swiping) return;
+    const lock = swipeLock;
     swiping = false;
+    swipeLock = null;
+    if (lock !== "swipe") return;
     const dx = e.clientX - swipeX;
-    if (Math.abs(dx) > 50) shift(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) > COMMIT_PX) shift(dx < 0 ? 1 : -1);
+  }
+  function onPointerCancel() {
+    swiping = false;
+    swipeLock = null;
   }
 </script>
 
@@ -70,7 +102,9 @@
   role="group"
   aria-label="Daily tasks"
   onpointerdown={onPointerDown}
+  onpointermove={onPointerMove}
   onpointerup={onPointerUp}
+  onpointercancel={onPointerCancel}
   style="touch-action: pan-y;"
 >
   <SectionShell
