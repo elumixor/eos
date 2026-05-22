@@ -47,6 +47,11 @@ class Dnd {
   private pendingX = 0;
   private pendingY = 0;
   private lastScrollTs = 0;
+  // Cleared when the finger is not over any registered list; gates whether
+  // pointerup commits the drop. Otherwise releasing the finger over a
+  // header / FAB / status bar would silently drop into the most recently
+  // hovered list at a stale index.
+  private validSlot = false;
 
   // `ev` only needs the pointer position. A real PointerEvent works, but the
   // long-press path begins mid-gesture and passes the last known coords.
@@ -62,6 +67,7 @@ class Dnd {
     this.fromList = from;
     this.overList = from;
     this.overIndex = 0;
+    this.validSlot = true;
     this.x = ev.clientX;
     this.y = ev.clientY;
     this.pendingX = ev.clientX;
@@ -119,7 +125,11 @@ class Dnd {
   private recomputeDropSlot() {
     const el = document.elementFromPoint(this.pendingX, this.pendingY);
     const listEl = el?.closest<HTMLElement>("[data-dnd-list]");
-    if (!listEl) return;
+    if (!listEl) {
+      this.validSlot = false;
+      return;
+    }
+    this.validSlot = true;
 
     const prevList = this.overList;
     const prevIndex = this.overIndex;
@@ -186,7 +196,12 @@ class Dnd {
     if (dy === 0) return; // left the zone — stop spinning
 
     // Normalise speed to 60fps so a janky frame doesn't undershoot.
-    window.scrollBy(0, dy * (dtMs / 16.67));
+    // Assumes the task lists live in the root document scroller (true
+    // for the current layout — RangeSection/DailySection/UnscheduledSection
+    // are direct children of +page.svelte under document scroll). If a
+    // future list lands in a nested scroll container, walk up from
+    // elementFromPoint to find the nearest scrollable ancestor instead.
+    window.scrollBy(0, dy * (dtMs / (1000 / 60)));
     // The list element under the finger may now be different — the drop
     // slot needs to follow the moving viewport even though pendingX/Y
     // haven't changed.
@@ -230,28 +245,34 @@ class Dnd {
     const onDrop = this.onDrop;
     const fromList = this.fromList;
     const overList = this.overList;
-    const willDrop = commit && this.taskIds.length > 0 && fromList !== null && overList !== null && onDrop !== null;
+    // Drop only when committed AND the finger is over a registered list.
+    // Releasing over a header / FAB / status bar should not silently land
+    // the drag into the most recently hovered list.
+    const willDrop = commit && this.validSlot && this.taskIds.length > 0 && onDrop !== null;
     if (willDrop) {
       tapMedium();
       onDrop({
         taskIds: this.taskIds.slice(),
-        from: fromList,
-        to: overList,
+        from: fromList as string,
+        to: overList as string,
         index: this.overIndex,
       });
     }
 
+    const hadActiveDrag = this.taskIds.length > 0;
     this.taskIds = [];
     this.fromList = null;
     this.overList = null;
+    this.validSlot = false;
 
-    // iOS and some Androids fire a synthetic `click` on pointerup after a
-    // pointer sequence. That click would land on whatever is under the
-    // finger at release and could (e.g.) put a task into edit mode. The
-    // synthetic click follows the pointer events within a few ms, so a
-    // tight 120ms window suffices — wider would risk eating a legitimate
-    // tap on a toolbar button.
-    if (willDrop) suppressNextClick();
+    // iOS and some Androids fire a synthetic `click` on pointerup. That
+    // click would land on whatever is under the finger at release and
+    // could (e.g.) put a task into edit mode. Suppress on any real drag —
+    // including cancels and drops outside any list — so the click-through
+    // bug can't slip through one of those paths. 300ms covers Android's
+    // legacy synthetic-click delay; missing one stray tap is preferable
+    // to letting the original bug back in.
+    if (hadActiveDrag) suppressNextClick();
   }
 }
 
@@ -262,7 +283,7 @@ function suppressNextClick() {
     window.removeEventListener("click", swallow, true);
   };
   window.addEventListener("click", swallow, true);
-  setTimeout(() => window.removeEventListener("click", swallow, true), 120);
+  setTimeout(() => window.removeEventListener("click", swallow, true), 300);
 }
 
 export const dnd = new Dnd();
