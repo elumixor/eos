@@ -68,6 +68,10 @@
   let swipePointerId: number | null = null;
   function onPointerDown(e: PointerEvent) {
     if (dnd.active || e.pointerType !== "touch") return;
+    // Chevron / Today / calendar buttons are nested inside this wrapper. Their
+    // onclick stops propagation but pointerdown does not, so without this bail
+    // a touch on a chevron primes the swipe state and can commit a shift.
+    if (e.target instanceof Element && e.target.closest("button")) return;
     // Already tracking another finger — ignore the new pointer entirely so a
     // second touch can't rewrite the origin mid-swipe.
     if (swiping) return;
