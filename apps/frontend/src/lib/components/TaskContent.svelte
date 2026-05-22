@@ -29,6 +29,7 @@
         class="pill pill-project"
         onclick={(e) => filterByProject(e, seg.id)}
         onpointerdown={(e) => e.stopPropagation()}
+        onpointerup={(e) => e.stopPropagation()}
       >
         {#if seg.project}
           <ProjectAvatar project={seg.project} size={15} />
