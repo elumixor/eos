@@ -138,7 +138,8 @@
   // True only after a pointerdown that wasn't filtered out (side-panel button,
   // editing mode, secondary button). Without this gate, a pointerup that
   // bubbles up from a sibling layer — for example after a backdrop close —
-  // could fall into the tap-to-edit branch with stale coordinates.
+  // would fall into the tap-to-edit branch using `startX`/`lastX` from a
+  // prior gesture, where `moved` evaluates to false and `startEdit` fires.
   let hadDown = false;
   let startX = 0;
   let startY = 0;
@@ -346,9 +347,16 @@
     hadDown = false;
     clearLp();
     cardEl?.releasePointerCapture?.(e.pointerId);
-    // A system-cancelled gesture (notification, browser-back swipe, etc.)
-    // must never auto-fire a destructive action — just snap the tray closed.
-    if (lock === "swipe" && tx !== 0) closeTray();
+    // pointercancel can come from a system interruption (notification,
+    // browser-back swipe) or, occasionally, from the end of a fast user
+    // flick. Either way auto-firing delete/complete is the wrong default —
+    // we'd rather drop the action and let the user retry than nuke a task
+    // on a flick they didn't realise had crossed the trigger. A light tap
+    // acknowledges the dropped gesture so it doesn't feel silent.
+    if (lock === "swipe" && tx !== 0) {
+      closeTray();
+      tapLight();
+    }
     lock = null;
   }
 

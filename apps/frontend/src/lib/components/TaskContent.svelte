@@ -29,7 +29,6 @@
         class="pill pill-project"
         onclick={(e) => filterByProject(e, seg.id)}
         onpointerdown={(e) => e.stopPropagation()}
-        onpointerup={(e) => e.stopPropagation()}
       >
         {#if seg.project}
           <ProjectAvatar project={seg.project} size={15} />
@@ -56,7 +55,6 @@
         rel="noopener noreferrer"
         onclick={(e) => e.stopPropagation()}
         onpointerdown={(e) => e.stopPropagation()}
-        onpointerup={(e) => e.stopPropagation()}
       >
         <MapPin size={11} strokeWidth={2.5} />
         <span class="pill-place-name" title={seg.name}>{seg.name}</span>
@@ -69,7 +67,6 @@
         rel="noopener noreferrer"
         onclick={(e) => e.stopPropagation()}
         onpointerdown={(e) => e.stopPropagation()}
-        onpointerup={(e) => e.stopPropagation()}
       >
         <Link2 size={11} strokeWidth={2.5} />
         {fmtLinkLabel(seg.url)}
