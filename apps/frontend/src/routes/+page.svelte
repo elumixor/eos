@@ -8,11 +8,14 @@
   import { projects } from "$lib/projects.svelte";
   import { sections } from "$lib/sections.svelte";
   import {
+    addDays,
     effectiveDate,
     explicitDate,
     extractFields,
+    inRange,
     localISO,
     projectIds,
+    rangeSize,
     resolveRange,
     setTaskDate,
   } from "$lib/tokens";
@@ -49,6 +52,32 @@
   const dailyTasks = $derived(visibleTasks.filter((t) => effectiveDate(t) === selectedDate));
   const unscheduledTasks = $derived(visibleTasks.filter((t) => effectiveDate(t) === null));
 
+  // Bucket each task into exactly one range section: the tightest (smallest)
+  // range containing its effective date. Tasks shown in the Daily section are
+  // excluded so the time-bucket sections are mutually exclusive with it too.
+  // Ties on size break by section order (the first matching section wins).
+  const rangeBuckets = $derived.by(() => {
+    const resolved = sections.list.map((s) => ({ id: s.id, range: resolveRange(s) }));
+    const sizes = new Map(resolved.map((r) => [r.id, rangeSize(r.range)]));
+    const buckets = new Map<string, Task[]>(resolved.map((r) => [r.id, []]));
+    for (const t of visibleTasks) {
+      const d = effectiveDate(t);
+      if (d === null || d === selectedDate) continue;
+      let winner: { id: string; range: { start: string; end: string } } | undefined;
+      let winnerSize = Number.POSITIVE_INFINITY;
+      for (const r of resolved) {
+        if (!inRange(d, r.range)) continue;
+        const sz = sizes.get(r.id) ?? Number.POSITIVE_INFINITY;
+        if (sz < winnerSize) {
+          winner = r;
+          winnerSize = sz;
+        }
+      }
+      if (winner) buckets.get(winner.id)!.push(t);
+    }
+    return buckets;
+  });
+
   const draggedTask = $derived(
     dnd.taskId ? tasks.find((t) => t.id === dnd.taskId) : undefined,
   );
@@ -68,7 +97,11 @@
     }
   }
 
-  // Resolve a drop target list id into the new effective date.
+  // Resolve a drop target list id into the new effective date. For multi-day
+  // sections containing today, we pick the earliest non-today date in the
+  // range so the task lands in the section rather than falling through to the
+  // Daily section (sections are mutually exclusive with Daily). Single-day
+  // sections whose only date is today keep today.
   function targetDate(to: string): string | null {
     if (to.startsWith("daily:")) return to.slice("daily:".length);
     if (to.startsWith("section:")) {
@@ -76,7 +109,9 @@
       if (!s) return null;
       const r = resolveRange(s);
       const today = localISO(new Date(), false);
-      return today >= r.start && today <= r.end ? today : r.start;
+      if (today < r.start || today > r.end) return r.start;
+      if (r.start === r.end) return today;
+      return r.start === today ? addDays(today, 1) : r.start;
     }
     return null; // "unscheduled"
   }
@@ -304,8 +339,7 @@
         <div class="border-t border-[var(--color-border)] mx-8"></div>
         <RangeSection
           {section}
-          tasks={visibleTasks}
-          excludeDate={selectedDate}
+          tasks={rangeBuckets.get(section.id) ?? []}
           onEditSection={(s) => (editorFor = { section: s })}
           onToggleTask={handleToggleTask}
           onDeleteTask={handleDeleteTask}

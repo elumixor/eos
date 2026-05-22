@@ -383,10 +383,17 @@ function fromISO(s: string): Date {
   return new Date(y, m - 1, d);
 }
 
-function addDays(s: string, n: number): string {
+export function addDays(s: string, n: number): string {
   const d = fromISO(s);
   d.setDate(d.getDate() + n);
   return localISO(d, false);
+}
+
+// Inclusive day count of a resolved range.
+export function rangeSize(r: { start: string; end: string }): number {
+  const a = fromISO(r.start);
+  const b = fromISO(r.end);
+  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1;
 }
 
 function addUnit(s: string, unit: string, n: number): string {
