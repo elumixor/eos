@@ -61,6 +61,12 @@ class Dnd {
 
   // `ev` only needs the pointer position. A real PointerEvent works, but the
   // long-press path begins mid-gesture and passes the last known coords.
+  /**
+   * Returns false if a drag is already in progress so the caller can roll back
+   * any local lock state it set in anticipation. A silent no-op here would
+   * leave the second initiator's UI stuck (lock="reorder", pointer released)
+   * with no Dnd tracking it.
+   */
   start(
     taskIds: string | string[],
     label: string,
@@ -68,11 +74,11 @@ class Dnd {
     ev: { clientX: number; clientY: number },
     width: number,
     rect?: { left: number; top: number },
-  ) {
+  ): boolean {
     // Re-entrancy guard: a stray second long-press or future call path that
     // skips finish() must not stomp on in-flight drag state (listeners
     // would leak and finish() would run twice).
-    if (this.active) return;
+    if (this.active) return false;
     this.taskIds = Array.isArray(taskIds) ? taskIds.slice() : [taskIds];
     this.label = label;
     this.fromList = from;
@@ -112,6 +118,7 @@ class Dnd {
     // Recompute the drop slot immediately so a drag that starts already over
     // a valid index isn't misreported as "before slot 0" until the next move.
     this.recomputeDropSlot();
+    return true;
   }
 
   private scheduleFlush() {
