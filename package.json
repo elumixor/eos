@@ -12,7 +12,7 @@
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check .",
-    "release:ios": "bun scripts/release-ios.ts"
+    "release": "bun scripts/release-ios.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
