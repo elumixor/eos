@@ -395,9 +395,9 @@
       if (e.isComposing || e.keyCode === 229) return;
       // Touch phones: Enter inserts a newline (no other easy way). Submit is
       // reachable via the explicit button or blur. Desktop/hybrid devices
-      // keep Enter=submit since they have Shift+Enter or external newline
-      // input methods.
-      if (touchDevice) {
+      // keep Enter=submit, but Shift+Enter inserts a newline so multi-line
+      // tasks are typeable without leaving the keyboard.
+      if (touchDevice || e.shiftKey) {
         e.preventDefault();
         // insertLineBreak is deprecated and a no-op in some mobile WebViews
         // (Firefox mobile). Fall back to insertHTML so we never lose the
