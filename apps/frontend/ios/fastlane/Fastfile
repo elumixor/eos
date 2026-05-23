@@ -1,7 +1,7 @@
 default_platform(:ios)
 
 PROJECT = "App/App.xcodeproj"
-SCHEME = "App"
+SCHEME = "Eos"
 APP_IDENTIFIER = "com.atma.eos.app"
 
 platform :ios do
