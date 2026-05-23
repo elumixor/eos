@@ -1,6 +1,6 @@
 default_platform(:ios)
 
-WORKSPACE = "App/App.xcworkspace"
+PROJECT = "App/App.xcodeproj"
 SCHEME = "App"
 APP_IDENTIFIER = "com.atma.eos.app"
 
@@ -48,7 +48,7 @@ platform :ios do
     end
 
     build_app(
-      workspace: WORKSPACE,
+      project: PROJECT,
       scheme: SCHEME,
       configuration: "Release",
       export_method: "app-store",
