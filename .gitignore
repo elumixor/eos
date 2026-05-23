@@ -24,3 +24,8 @@ apps/frontend/ios/App/App/config.xml
 
 # Playwright MCP
 .playwright-mcp/
+
+# Playwright (local-only)
+apps/frontend/playwright/
+apps/frontend/playwright.config.ts
+apps/frontend/screenshots/

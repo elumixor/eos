@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green --kill-others-on-fail 'bun --filter backend dev' 'bun --filter frontend dev'",
+    "ios": "bun --filter frontend ios",
+    "ios:prod": "bun --filter frontend ios:prod",
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check ."
