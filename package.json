@@ -11,7 +11,8 @@
     "ios:prod": "bun --filter frontend ios:prod",
     "lint": "biome lint .",
     "format": "biome format . --write",
-    "check": "biome check ."
+    "check": "biome check .",
+    "release:ios": "bun scripts/release-ios.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
