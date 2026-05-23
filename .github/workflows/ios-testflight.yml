@@ -18,8 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+      - name: Select latest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -34,11 +34,23 @@ jobs:
       - name: Install JS deps
         run: bun install --frozen-lockfile
 
+      - name: Generate backend client (consumed by frontend)
+        working-directory: apps/backend
+        run: |
+          bun run prisma:generate
+          bun run client:generate
+
       - name: Build web bundle + sync iOS
         working-directory: apps/frontend
         run: |
           bun run build
           bunx cap sync ios
+
+      - name: Write ASC API key to disk
+        run: |
+          mkdir -p "$HOME/.appstoreconnect"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_CONTENT" > "$HOME/.appstoreconnect/key.p8"
+          echo "APP_STORE_CONNECT_API_KEY_PATH=$HOME/.appstoreconnect/key.p8" >> "$GITHUB_ENV"
 
       - name: Import signing certificate
         uses: apple-actions/import-codesign-certs@v3
