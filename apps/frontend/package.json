@@ -10,7 +10,8 @@
     "sync": "cap sync ios",
     "assets": "bun -e 'import sharp from \"sharp\"; const s=Buffer.from(await Bun.file(\"assets/icon.svg\").arrayBuffer()); await sharp(s,{density:384}).resize(1024,1024).png().toFile(\"assets/icon.png\"); const bg=`<svg width=\"2732\" height=\"2732\" xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"2732\" height=\"2732\" fill=\"#0b0b10\"/></svg>`; const c=await sharp(s,{density:384}).resize(820,820).png().toBuffer(); for (const f of [\"splash\",\"splash-dark\"]) await sharp(Buffer.from(bg)).composite([{input:c,gravity:\"center\"}]).png().toFile(`assets/${f}.png`);' && capacitor-assets generate --ios && cap sync ios",
     "ios": "CAPACITOR_LIVE_RELOAD=true cap sync ios && cap open ios",
-    "ios:prod": "VITE_API_URL=https://eos-backend-todoroappatma-4183s-projects.vercel.app vite build && cap sync ios && cap open ios"
+    "ios:prod": "VITE_API_URL=https://eos-backend-todoroappatma-4183s-projects.vercel.app vite build && cap sync ios && cap open ios",
+    "ios:beta": "VITE_API_URL=https://eos-backend-todoroappatma-4183s-projects.vercel.app vite build && cap sync ios && cd ios && bundle exec fastlane beta"
   },
   "dependencies": {
     "@capacitor/app": "^8.0.1",
@@ -30,6 +31,7 @@
     "@sveltejs/kit": "^2.20.4",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@tailwindcss/vite": "^4.2.2",
+    "@types/node": "^25.9.1",
     "sharp": "^0.34.5",
     "svelte": "^5.25.6",
     "tailwindcss": "^4.1.3",

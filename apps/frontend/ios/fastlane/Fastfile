@@ -1,0 +1,51 @@
+default_platform(:ios)
+
+WORKSPACE = "App/App.xcworkspace"
+SCHEME = "App"
+APP_IDENTIFIER = "com.atma.eos.app"
+
+platform :ios do
+  desc "Build and upload a new TestFlight build"
+  lane :beta do
+    # App Store Connect API key — required for both build-number lookup and upload.
+    # Locally: set APP_STORE_CONNECT_API_KEY_PATH to a .p8 file on disk.
+    # CI: provide APP_STORE_CONNECT_API_KEY_CONTENT (base64-encoded .p8) instead.
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+      issuer_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID"),
+      key_filepath: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
+      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
+      is_key_content_base64: !ENV["APP_STORE_CONNECT_API_KEY_CONTENT"].nil?,
+      in_house: false
+    )
+
+    next_build = latest_testflight_build_number(
+      app_identifier: APP_IDENTIFIER,
+      api_key: api_key,
+      initial_build_number: 0
+    ) + 1
+
+    increment_build_number(
+      xcodeproj: "App/App.xcodeproj",
+      build_number: next_build
+    )
+
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "build",
+      output_name: "App.ipa",
+      clean: true,
+      xcargs: "-allowProvisioningUpdates"
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: APP_IDENTIFIER,
+      skip_waiting_for_build_processing: true,
+      ipa: "build/App.ipa"
+    )
+  end
+end
