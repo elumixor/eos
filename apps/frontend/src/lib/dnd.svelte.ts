@@ -28,6 +28,12 @@ class Dnd {
   x = $state(0);
   y = $state(0);
   width = $state(0);
+  // Offset of the pointer from the dragged element's top-left at gesture
+  // start. The ghost is positioned at (x - offsetX, y - offsetY) so the
+  // finger stays at exactly the point on the row it grabbed — no horizontal
+  // snap.
+  offsetX = $state(0);
+  offsetY = $state(0);
 
   onDrop: ((p: DropPayload) => void) | null = null;
 
@@ -55,13 +61,24 @@ class Dnd {
 
   // `ev` only needs the pointer position. A real PointerEvent works, but the
   // long-press path begins mid-gesture and passes the last known coords.
+  /**
+   * Returns false if a drag is already in progress so the caller can roll back
+   * any local lock state it set in anticipation. A silent no-op here would
+   * leave the second initiator's UI stuck (lock="reorder", pointer released)
+   * with no Dnd tracking it.
+   */
   start(
     taskIds: string | string[],
     label: string,
     from: string,
     ev: { clientX: number; clientY: number },
     width: number,
-  ) {
+    rect?: { left: number; top: number },
+  ): boolean {
+    // Re-entrancy guard: a stray second long-press or future call path that
+    // skips finish() must not stomp on in-flight drag state (listeners
+    // would leak and finish() would run twice).
+    if (this.active) return false;
     this.taskIds = Array.isArray(taskIds) ? taskIds.slice() : [taskIds];
     this.label = label;
     this.fromList = from;
@@ -73,10 +90,27 @@ class Dnd {
     this.pendingX = ev.clientX;
     this.pendingY = ev.clientY;
     this.width = width;
+    // If the caller knows the dragged element's bounding box, preserve the
+    // grab point exactly. Otherwise center the ghost under the finger — any
+    // fixed offset re-introduces the "ghost snaps to a constant position"
+    // symptom this code path was added to avoid.
+    if (rect) {
+      this.offsetX = ev.clientX - rect.left;
+      this.offsetY = ev.clientY - rect.top;
+    } else {
+      this.offsetX = width / 2;
+      this.offsetY = 0;
+    }
     // Suppress native text selection / iOS touch-callout for the whole drag.
     // The class also sets `touch-action: none`, which prevents the browser
     // from panning the page while we are handling pointermove ourselves.
     document.documentElement.classList.add("dnd-dragging");
+    // iOS Safari keeps the page panning in parallel with the pointermove
+    // stream unless a non-passive touchmove listener swallows it. We use
+    // *only* this mechanism — locking document/body overflow would also
+    // work on iOS, but it collapses the document scroll area on desktop
+    // and silently breaks the edge auto-scroll's `window.scrollBy` call.
+    window.addEventListener("touchmove", this.blockTouch, { passive: false });
     selectionStart();
     window.addEventListener("pointermove", this.move, { passive: false });
     window.addEventListener("pointerup", this.endDrop);
@@ -84,6 +118,7 @@ class Dnd {
     // Recompute the drop slot immediately so a drag that starts already over
     // a valid index isn't misreported as "before slot 0" until the next move.
     this.recomputeDropSlot();
+    return true;
   }
 
   private scheduleFlush() {
@@ -93,6 +128,13 @@ class Dnd {
 
   // pointermove fires far faster than paint on touch devices; capture the
   // latest coords and reconcile once per frame so we never thrash reactivity.
+  // Non-passive touchmove listener — required on iOS Safari to fully stop
+  // the native scroll once a drag is underway. `touch-action: none` and
+  // pointermove.preventDefault() aren't enough on their own.
+  private blockTouch = (ev: TouchEvent) => {
+    if (ev.cancelable) ev.preventDefault();
+  };
+
   private move = (ev: PointerEvent) => {
     // `preventDefault` here is belt-and-braces — `touch-action: none` on the
     // root (via .dnd-dragging) is what actually stops native panning.
@@ -237,6 +279,7 @@ class Dnd {
     }
 
     document.documentElement.classList.remove("dnd-dragging");
+    window.removeEventListener("touchmove", this.blockTouch);
     window.removeEventListener("pointermove", this.move);
     window.removeEventListener("pointerup", this.endDrop);
     window.removeEventListener("pointercancel", this.cancelDrop);

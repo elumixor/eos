@@ -201,15 +201,22 @@
   let modMeta = false;
 
   function startReorder(x: number, y: number, pid: number) {
-    lock = "reorder";
-    tapLight();
-    tx = 0;
-    cardEl?.releasePointerCapture?.(pid);
     // If this task is part of a multi-selection, the whole selection
     // travels together. Otherwise it's a plain single drag.
     const ids = multi.has(task.id) && multi.size > 1 ? multi.list : [task.id];
     const label = ids.length > 1 ? `${ids.length} tasks` : task.text;
-    dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth());
+    // Anchor the ghost so the finger stays at the same point on the row it
+    // grabbed — without the rect, the ghost would snap horizontally to a
+    // fixed offset at drag start.
+    const r = el?.getBoundingClientRect();
+    // Try to claim the global drag before mutating local lock state, so a
+    // concurrent drag (e.g. two-finger long-press on a second row) can't
+    // leave this row stuck in `reorder` with the pointer already released.
+    if (!dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth(), r)) return;
+    lock = "reorder";
+    tapLight();
+    tx = 0;
+    cardEl?.releasePointerCapture?.(pid);
   }
 
   function onDown(e: PointerEvent) {

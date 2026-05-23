@@ -494,8 +494,7 @@
     class="fixed z-50 pointer-events-none px-4 py-3.5 rounded-2xl bg-[var(--color-surface-2)]
       shadow-xl shadow-black/40 text-[13px] font-light tracking-wide text-[var(--color-ink)]
       border border-[var(--color-accent)]/30"
-    style="left: {dnd.x}px; top: {dnd.y}px; width: {dnd.width}px;
-      transform: translate(-28px, -50%);"
+    style="left: {dnd.x - dnd.offsetX}px; top: {dnd.y - dnd.offsetY}px; width: {dnd.width}px;"
   >
     {#if dnd.taskIds.length > 1}
       <span class="font-medium text-[var(--color-accent)]">{dnd.label}</span>
