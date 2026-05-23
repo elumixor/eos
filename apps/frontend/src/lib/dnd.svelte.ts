@@ -35,13 +35,6 @@ class Dnd {
   offsetX = $state(0);
   offsetY = $state(0);
 
-  // Saved body styles, restored on finish(). iOS Safari keeps the in-flight
-  // scroll momentum running unless we both lock overflow AND swallow
-  // touchmove with preventDefault — `touch-action: none` set after the
-  // gesture has already begun is not enough on its own.
-  private prevBodyOverflow = "";
-  private prevHtmlOverflow = "";
-
   onDrop: ((p: DropPayload) => void) | null = null;
 
   /** First / primary task being dragged. Used for the ghost preview. */
@@ -76,6 +69,10 @@ class Dnd {
     width: number,
     rect?: { left: number; top: number },
   ) {
+    // Re-entrancy guard: a stray second long-press or future call path that
+    // skips finish() must not stomp on in-flight drag state (listeners
+    // would leak and finish() would run twice).
+    if (this.active) return;
     this.taskIds = Array.isArray(taskIds) ? taskIds.slice() : [taskIds];
     this.label = label;
     this.fromList = from;
@@ -88,29 +85,25 @@ class Dnd {
     this.pendingY = ev.clientY;
     this.width = width;
     // If the caller knows the dragged element's bounding box, preserve the
-    // grab point exactly. Otherwise fall back to centering vertically and
-    // hanging slightly off the finger horizontally — better than nothing for
-    // synthesised starts that don't carry a rect.
+    // grab point exactly. Otherwise center the ghost under the finger — any
+    // fixed offset re-introduces the "ghost snaps to a constant position"
+    // symptom this code path was added to avoid.
     if (rect) {
       this.offsetX = ev.clientX - rect.left;
       this.offsetY = ev.clientY - rect.top;
     } else {
-      this.offsetX = 28;
-      this.offsetY = 24;
+      this.offsetX = width / 2;
+      this.offsetY = 0;
     }
     // Suppress native text selection / iOS touch-callout for the whole drag.
     // The class also sets `touch-action: none`, which prevents the browser
     // from panning the page while we are handling pointermove ourselves.
     document.documentElement.classList.add("dnd-dragging");
-    // Lock page scroll for the duration of the drag. iOS Safari otherwise
-    // keeps panning the page in parallel with the pointermove stream, so
-    // the two gestures fight each other.
-    this.prevBodyOverflow = document.body.style.overflow;
-    this.prevHtmlOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    // Pointer events' preventDefault doesn't cancel the underlying touch's
-    // native scroll on iOS — only a non-passive touchmove listener does.
+    // iOS Safari keeps the page panning in parallel with the pointermove
+    // stream unless a non-passive touchmove listener swallows it. We use
+    // *only* this mechanism — locking document/body overflow would also
+    // work on iOS, but it collapses the document scroll area on desktop
+    // and silently breaks the edge auto-scroll's `window.scrollBy` call.
     window.addEventListener("touchmove", this.blockTouch, { passive: false });
     selectionStart();
     window.addEventListener("pointermove", this.move, { passive: false });
@@ -279,8 +272,6 @@ class Dnd {
     }
 
     document.documentElement.classList.remove("dnd-dragging");
-    document.body.style.overflow = this.prevBodyOverflow;
-    document.documentElement.style.overflow = this.prevHtmlOverflow;
     window.removeEventListener("touchmove", this.blockTouch);
     window.removeEventListener("pointermove", this.move);
     window.removeEventListener("pointerup", this.endDrop);
