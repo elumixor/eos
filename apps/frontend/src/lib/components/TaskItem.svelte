@@ -507,9 +507,17 @@
   }
 
   function handleToggle() {
-    if (!task.completed) notifySuccess();
-    else tapLight();
+    // Flip the visual state first; the haptic is fire-and-forget. The Capacitor
+    // bridge call is cheap, but the native haptic engine wake-up has been seen
+    // to briefly stall the main thread on iOS during pointerup, which makes the
+    // optimistic update in handleToggleTask paint a frame later than it should.
+    // Deferring with setTimeout(0) lets the flip render before any native work.
+    const willComplete = !task.completed;
     onToggle(task);
+    setTimeout(() => {
+      if (willComplete) notifySuccess();
+      else tapLight();
+    }, 0);
   }
 </script>
 
