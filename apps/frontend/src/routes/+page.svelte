@@ -22,6 +22,7 @@
   import UnscheduledSection from "$lib/components/UnscheduledSection.svelte";
   import SectionEditor from "$lib/components/SectionEditor.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
+  import ProjectPicker from "$lib/components/ProjectPicker.svelte";
   import TaskContent from "$lib/components/TaskContent.svelte";
   import VoiceButton from "$lib/components/VoiceButton.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
@@ -39,6 +40,7 @@
   // null = closed; { section } where section is null for "create".
   let editorFor = $state<{ section: Section | null } | null>(null);
   let addInput: RichTaskInput | undefined = $state();
+  let pickerOpen = $state(false);
 
   const matchesFilter = (t: Task) => {
     if (!projects.filterId) return true;
@@ -99,7 +101,30 @@
     [tasks] = await Promise.all([api.tasks.$get(), projects.load(), sections.load()]);
     loading = false;
     dnd.onDrop = commitDrop;
+
+    window.addEventListener("keydown", onGlobalKeydown);
+    return () => window.removeEventListener("keydown", onGlobalKeydown);
   });
+
+  // Cmd+K (Mac) / Ctrl+K opens the project picker. Skipped while the user is
+  // typing in an input, textarea, contenteditable, or the picker itself — we
+  // never want to hijack mid-edit. Always preventDefault so we don't lose the
+  // shortcut to the browser's address-bar focus on Chrome/Firefox.
+  function onGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== "k" && e.key !== "K") return;
+    if (!(e.metaKey || e.ctrlKey)) return;
+    if (e.altKey || e.shiftKey) return;
+    if (isEditableTarget(e.target)) return;
+    e.preventDefault();
+    pickerOpen = !pickerOpen;
+  }
+
+  function isEditableTarget(t: EventTarget | null): boolean {
+    if (!(t instanceof HTMLElement)) return false;
+    if (t.isContentEditable) return true;
+    const tag = t.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  }
 
   async function refresh() {
     refreshing = true;
@@ -421,6 +446,10 @@
 
 {#if editorFor}
   <SectionEditor section={editorFor.section} onClose={() => (editorFor = null)} />
+{/if}
+
+{#if pickerOpen}
+  <ProjectPicker onClose={() => (pickerOpen = false)} />
 {/if}
 
 {#if !loading}
