@@ -10,14 +10,16 @@ platform :ios do
     # App Store Connect API key — required for both build-number lookup and upload.
     # Locally: set APP_STORE_CONNECT_API_KEY_PATH to a .p8 file on disk.
     # CI: provide APP_STORE_CONNECT_API_KEY_CONTENT (base64-encoded .p8) instead.
-    api_key = app_store_connect_api_key(
-      key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
-      issuer_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID"),
-      key_filepath: ENV["APP_STORE_CONNECT_API_KEY_PATH"],
-      key_content: ENV["APP_STORE_CONNECT_API_KEY_CONTENT"],
-      is_key_content_base64: false,
-      in_house: false
-    )
+    key_args = { key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+                 issuer_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ISSUER_ID"),
+                 in_house: false }
+    if ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+      key_args[:key_filepath] = ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+    else
+      key_args[:key_content] = ENV.fetch("APP_STORE_CONNECT_API_KEY_CONTENT")
+      key_args[:is_key_content_base64] = false
+    end
+    api_key = app_store_connect_api_key(**key_args)
 
     next_build = latest_testflight_build_number(
       app_identifier: APP_IDENTIFIER,
@@ -30,6 +32,13 @@ platform :ios do
       build_number: next_build
     )
 
+    xcargs = ["-allowProvisioningUpdates"]
+    if ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+      xcargs << "-authenticationKeyID #{ENV.fetch('APP_STORE_CONNECT_API_KEY_ID')}"
+      xcargs << "-authenticationKeyIssuerID #{ENV.fetch('APP_STORE_CONNECT_API_KEY_ISSUER_ID')}"
+      xcargs << "-authenticationKeyPath #{ENV.fetch('APP_STORE_CONNECT_API_KEY_PATH')}"
+    end
+
     build_app(
       workspace: WORKSPACE,
       scheme: SCHEME,
@@ -38,7 +47,7 @@ platform :ios do
       output_directory: "build",
       output_name: "App.ipa",
       clean: true,
-      xcargs: "-allowProvisioningUpdates"
+      xcargs: xcargs.join(" ")
     )
 
     upload_to_testflight(
