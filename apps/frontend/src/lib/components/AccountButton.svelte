@@ -36,7 +36,8 @@
           ? {
               google: {
                 webClientId: googleWeb,
-                iOSServerClientId: googleIOS ?? googleWeb,
+                ...(googleIOS ? { iOSClientId: googleIOS } : {}),
+                iOSServerClientId: googleWeb,
                 mode: "online",
               },
             }
