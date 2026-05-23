@@ -65,7 +65,7 @@ jobs:
           profile-type: IOS_APP_STORE
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT_RAW }}
+          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
 
       - name: Fastlane beta
         working-directory: apps/frontend/ios
