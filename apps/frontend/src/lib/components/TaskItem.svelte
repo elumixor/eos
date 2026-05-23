@@ -209,7 +209,11 @@
     // travels together. Otherwise it's a plain single drag.
     const ids = multi.has(task.id) && multi.size > 1 ? multi.list : [task.id];
     const label = ids.length > 1 ? `${ids.length} tasks` : task.text;
-    dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth());
+    // Anchor the ghost so the finger stays at the same point on the row it
+    // grabbed — without the rect, the ghost would snap horizontally to a
+    // fixed offset at drag start.
+    const r = el?.getBoundingClientRect();
+    dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth(), r);
   }
 
   function onDown(e: PointerEvent) {
