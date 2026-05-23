@@ -215,7 +215,7 @@ html.dnd-dragging * {
   line-height: 1.45;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, filter 0.15s ease;
+  transition: filter 0.15s ease;
 }
 .pill svg, .pill img { display: block; }
 .pill-project {
