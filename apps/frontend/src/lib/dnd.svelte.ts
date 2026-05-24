@@ -243,7 +243,11 @@ class Dnd {
     // are direct children of +page.svelte under document scroll). If a
     // future list lands in a nested scroll container, walk up from
     // elementFromPoint to find the nearest scrollable ancestor instead.
-    window.scrollBy(0, dy * (dtMs / (1000 / 60)));
+    // iOS WKWebView silently no-ops `window.scrollBy` while a non-passive
+    // touch is in flight; mutating scrollTop on the scrolling element
+    // bypasses that path.
+    const scroller = document.scrollingElement ?? document.documentElement;
+    scroller.scrollTop += dy * (dtMs / (1000 / 60));
     // The list element under the finger may now be different — the drop
     // slot needs to follow the moving viewport even though pendingX/Y
     // haven't changed.

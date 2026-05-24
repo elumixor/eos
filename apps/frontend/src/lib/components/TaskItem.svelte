@@ -168,11 +168,30 @@
     return () => ro.disconnect();
   });
 
+  // iOS only honours preventDefault on the *first* touchmove of a gesture,
+  // so the scroll blocker must be installed at pointerdown — before any
+  // movement — to keep the page from panning out from under a long-press.
+  let blockTouchActive = false;
+  const blockTouch = (ev: TouchEvent) => {
+    if (ev.cancelable) ev.preventDefault();
+  };
+  function armScrollBlocker() {
+    if (blockTouchActive) return;
+    window.addEventListener("touchmove", blockTouch, { passive: false });
+    blockTouchActive = true;
+  }
+  function disarmScrollBlocker() {
+    if (!blockTouchActive) return;
+    window.removeEventListener("touchmove", blockTouch);
+    blockTouchActive = false;
+  }
+
   function clearLp() {
     if (lpTimer) {
       clearTimeout(lpTimer);
       lpTimer = null;
     }
+    disarmScrollBlocker();
   }
 
   function animateTo(v: number, ease: string = SPRING_EASE) {
@@ -212,6 +231,11 @@
     // Try to claim the global drag before mutating local lock state, so a
     // concurrent drag (e.g. two-finger long-press on a second row) can't
     // leave this row stuck in `reorder` with the pointer already released.
+    // Hand the scroll lock off to dnd — it installs its own non-passive
+    // touchmove blocker for the duration of the drag. Avoid leaking ours
+    // past the drop, where dnd would tear down its listener but not this
+    // component's.
+    disarmScrollBlocker();
     if (!dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth(), r)) return;
     lock = "reorder";
     tapLight();
@@ -241,6 +265,7 @@
     // Mouse: skip the long-press — vertical drag in onMove starts reorder
     // immediately, because there's no native scroll gesture to compete with.
     if (e.pointerType !== "mouse") {
+      armScrollBlocker();
       lpTimer = setTimeout(() => {
         if (!active || lock !== null) return;
         startReorder(lastX, lastY, e.pointerId);
