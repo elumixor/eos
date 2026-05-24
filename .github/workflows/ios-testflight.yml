@@ -14,6 +14,11 @@ jobs:
       APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
       APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
       VITE_API_URL: https://eos-backend-todoroappatma-4183s-projects.vercel.app
+      VITE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_GOOGLE_WEB_CLIENT_ID }}
+      VITE_GOOGLE_IOS_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_CLIENT_ID }}
+      VITE_APPLE_SERVICES_ID: ${{ secrets.VITE_APPLE_SERVICES_ID }}
+      VITE_APPLE_REDIRECT_URL: ${{ secrets.VITE_APPLE_REDIRECT_URL }}
+      VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
