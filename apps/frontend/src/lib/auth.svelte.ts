@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { api } from "$lib/api/client";
 import { markAuthReady } from "$lib/auth-ready";
+import { clearAll, setMeta } from "$lib/db/idb";
 import { ls } from "$lib/storage";
 
 let token = $state<string | null | undefined>(undefined);
@@ -42,12 +43,25 @@ export const auth = {
   get isLoggedIn() {
     return token !== null && token !== undefined;
   },
+  // Called after Google/Apple sign-in. The backend has merged the anonymous
+  // user's rows into the signed-in account (mergeAnonymousUser), so IDs are
+  // stable. We reset the sync cursor so the next pull picks up the full
+  // dataset for this account — including rows from other devices that the
+  // anonymous session never saw.
   async setToken(t: string) {
     await ls.set("authToken", t);
     token = t;
+    await setMeta("lastSyncAt", null);
   },
   async logout() {
     await ls.remove("authToken");
+    // Wipe the local cache so the next user (anonymous or signed-in)
+    // doesn't see stale rows from the previous session.
+    try {
+      await clearAll();
+    } catch {
+      // ignore — IDB unavailable on some platforms
+    }
     token = null;
     bootstrapPromise = null;
     void bootstrap();

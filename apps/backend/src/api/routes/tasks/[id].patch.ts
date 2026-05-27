@@ -4,13 +4,15 @@ import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
 
+const BUCKETS = ["today", "week", "later"] as const;
+
 export default handler(
   {
     body: {
       text: z.string().min(1).optional(),
       completed: z.boolean().optional(),
       order: z.number().optional(),
-      date: z.string().nullable().optional(),
+      bucket: z.enum(BUCKETS).optional(),
       projectId: z.string().nullable().optional(),
       startTime: z.string().nullable().optional(),
       duration: z.number().nullable().optional(),
@@ -18,12 +20,15 @@ export default handler(
   },
   async ({ user, router, body }) => {
     requireAuth(user);
-    const { startTime, ...rest } = body;
+    const { startTime, bucket, ...rest } = body;
     const result = await prisma.task.updateMany({
       where: { id: router.id, userId: user.id },
       data: {
         ...rest,
         ...(startTime !== undefined ? { startTime: startTime ? new Date(startTime) : null } : {}),
+        // Re-stamp scheduledAt whenever the bucket changes: today/week get
+        // "now" so overdue resets, later clears it.
+        ...(bucket !== undefined ? { bucket, scheduledAt: bucket === "later" ? null : new Date() } : {}),
       },
     });
     if (result.count === 0) throw createError({ statusCode: 404, statusMessage: "Task not found" });

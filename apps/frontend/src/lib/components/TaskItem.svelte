@@ -1,12 +1,10 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { Check, Trash2, Pencil, Copy, MoreHorizontal, Undo2 } from "lucide-svelte";
+  import { Check, Trash2, Pencil, Copy, Undo2 } from "lucide-svelte";
   import type { Task } from "$lib/api";
   import { stripTokens } from "$lib/tokens";
   import { dnd } from "$lib/dnd.svelte";
-  import { swipeOpen } from "$lib/swipe.svelte";
   import { selection as multi } from "$lib/selection.svelte";
-  import { notifySuccess, notifyWarning, tapLight, tapMedium, selection } from "$lib/haptics";
+  import { notifySuccess, notifyWarning, tapLight, tapMedium } from "$lib/haptics";
   import TaskContent from "./TaskContent.svelte";
   import RichTaskInput from "./RichTaskInput.svelte";
 
@@ -44,7 +42,6 @@
   } = $props();
 
   let el: HTMLLIElement | undefined = $state();
-  let cardEl: HTMLDivElement | undefined = $state();
   let mainEl: HTMLDivElement | undefined = $state();
   const isDragging = $derived(dnd.has(task.id));
   const isSelected = $derived(multi.has(task.id));
@@ -56,9 +53,6 @@
   }
 
   // ---- Tab navigation ------------------------------------------------------
-  // Tab moves focus to the next task row and opens it in edit mode; Shift+Tab
-  // moves backwards. Action buttons inside the row are tabindex=-1 so they
-  // don't trap Tab inside the row.
   function navigateTab(dir: 1 | -1) {
     const all = Array.from(document.querySelectorAll<HTMLElement>("[data-dnd-item]"));
     const idx = el ? all.indexOf(el) : -1;
@@ -89,84 +83,24 @@
     editing = false;
   }
 
-  // ---- Swipe / gesture pipeline -------------------------------------------
-  // One pointer pipeline drives everything: a short horizontal drag reveals an
-  // action tray, a long full drag auto-fires it, a press-and-hold starts a
-  // reorder drag, and a plain tap edits. Works for touch and mouse alike;
-  // trackpads go through the wheel handler.
+  // ---- Pointer pipeline ----------------------------------------------------
+  // Web (mouse): pointerdown + any movement → start drag. pointerup with no
+  // movement → edit. Right-click → context menu.
+  // Mobile (touch/pen): long-press (450ms held still) → open context menu and
+  // arm drag. After arming, any movement closes the menu and starts the drag.
+  // A plain tap (no long-press) → edit.
 
-  // Layout: a 2.2× wide strip [left action 60%][main 100%][right 60%] slides
-  // inside the row's clip box. Tray widths track the row width so the panels
-  // remain edge-to-edge — no white gap can appear as the strip crosses zero.
-  const TRAY_FRAC = 0.6; // each side panel is 60% of the row (= max swipe)
-  const ICON_W = 64; // natural width of one action icon (Options / Delete / Check)
-  // Snap-open ("peek") widths — small, icon-sized — distinct from the panel
-  // width. Releasing past `*OPEN_FACTOR` snaps to these; releasing past
-  // `tray * TRIGGER_RATIO` auto-fires.
-  const PEEK_LEFT = ICON_W; // one icon
-  const PEEK_RIGHT = ICON_W * 2; // Options + Delete
-  const OPEN_FACTOR = 0.5; // release at half the peek width → snap open
-  const TRIGGER_RATIO = 0.85; // release past 85% of the tray → auto-fire
-
-  // Strip is (1 + 2·TRAY_FRAC) = 2.2× the row. Child widths are expressed as
-  // a percentage of the strip itself, so the layout works before JS measures
-  // anything (no flash on first paint).
-  const STRIP_FRAC = 1 + 2 * TRAY_FRAC;
-  const LEFT_PCT = (TRAY_FRAC / STRIP_FRAC) * 100; // ≈ 27.273 (= 60% of row)
-  const MAIN_PCT = (1 / STRIP_FRAC) * 100; // ≈ 45.455 (= 100% of row)
-
-  let tx = $state(0); // foreground card translateX
-  let settling = $state(false); // enables the CSS transition while snapping
-  // Open snaps and cancel spring-backs use a slight overshoot (Spark-like);
-  // commit-close (after auto-firing an action) uses a plain ease-out, so the
-  // strip doesn't bounce past zero and flash the opposite tray.
-  const SPRING_EASE = "cubic-bezier(0.34, 1.3, 0.5, 1)";
-  const SETTLE_EASE = "cubic-bezier(0.22, 0.61, 0.36, 1)";
-  const SETTLE_MS = 260;
-  let settleEase = $state(SPRING_EASE);
-
-  // Spark-style progress signals — derived from tx so they update every frame
-  // the gesture moves. `*Progress` is 0→1 over the peek distance (icon fade);
-  // `armed` flips to ±1 once the swipe crosses the auto-fire threshold so the
-  // panel can flash brighter as a "release will commit" cue.
-  const leftProgress = $derived(Math.min(1, Math.max(0, tx) / PEEK_LEFT));
-  const rightProgress = $derived(Math.min(1, Math.max(0, -tx) / PEEK_RIGHT));
-  const armed = $derived(zoneOf(tx) === 2 ? Math.sign(tx) : 0);
-  type Lock = null | "swipe" | "scroll" | "reorder";
-  let lock: Lock = null;
-  let active = false; // a pointer is currently down on this row
-  // True only after a pointerdown that wasn't filtered out (side-panel button,
-  // editing mode, secondary button). Without this gate, a pointerup that
-  // bubbles up from a sibling layer — for example after a backdrop close —
-  // would fall into the tap-to-edit branch using `startX`/`lastX` from a
-  // prior gesture, where `moved` evaluates to false and `startEdit` fires.
+  let active = false;
   let hadDown = false;
   let startX = 0;
   let startY = 0;
   let lastX = 0;
   let lastY = 0;
-  let startTx = 0;
   let lpTimer: ReturnType<typeof setTimeout> | null = null;
-  let settleTimer: ReturnType<typeof setTimeout> | null = null;
-  let wheelTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastZone = 0;
-
-  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-  // Measured row width. Kept in state so the CSS strip can use it and the
-  // gesture math (clamps, thresholds) stays consistent across resizes.
-  let mainW = $state(0);
-  const rowWidth = () => mainW || el?.getBoundingClientRect().width || 320;
-  const trayW = () => rowWidth() * TRAY_FRAC; // LEFT_W === RIGHT_W
-
-  $effect(() => {
-    if (!el) return;
-    mainW = el.clientWidth;
-    const ro = new ResizeObserver(() => {
-      if (el) mainW = el.clientWidth;
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  });
+  let lpFired = false; // long-press menu opened on this gesture
+  let pointerType: string = "mouse";
+  let modShift = false;
+  let modMeta = false;
 
   // iOS only honours preventDefault on the *first* touchmove of a gesture,
   // so the scroll blocker must be installed at pointerdown — before any
@@ -191,295 +125,118 @@
       clearTimeout(lpTimer);
       lpTimer = null;
     }
-    disarmScrollBlocker();
   }
-
-  function animateTo(v: number, ease: string = SPRING_EASE) {
-    settleEase = ease;
-    settling = true;
-    tx = v;
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(() => (settling = false), SETTLE_MS);
-  }
-
-  function closeTray(opts: { ease?: string } = {}) {
-    animateTo(0, opts.ease ?? SPRING_EASE);
-    if (swipeOpen.id === task.id) swipeOpen.id = null;
-  }
-
-  // 0 = closed, 1 = open at the icon peek, 2 = far enough to auto-fire.
-  function zoneOf(v: number) {
-    const t = trayW();
-    const a = Math.abs(v);
-    const peek = v >= 0 ? PEEK_LEFT : PEEK_RIGHT;
-    return a >= t * TRIGGER_RATIO ? 2 : a >= peek * OPEN_FACTOR ? 1 : 0;
-  }
-
-  // Modifier flags captured at pointerdown so onUp can act as a tap-click.
-  let modShift = false;
-  let modMeta = false;
 
   function startReorder(x: number, y: number, pid: number) {
-    // If this task is part of a multi-selection, the whole selection
-    // travels together. Otherwise it's a plain single drag.
     const ids = multi.has(task.id) && multi.size > 1 ? multi.list : [task.id];
     const label = ids.length > 1 ? `${ids.length} tasks` : task.text;
-    // Anchor the ghost so the finger stays at the same point on the row it
-    // grabbed — without the rect, the ghost would snap horizontally to a
-    // fixed offset at drag start.
     const r = el?.getBoundingClientRect();
-    // Try to claim the global drag before mutating local lock state, so a
-    // concurrent drag (e.g. two-finger long-press on a second row) can't
-    // leave this row stuck in `reorder` with the pointer already released.
-    // Hand the scroll lock off to dnd — it installs its own non-passive
-    // touchmove blocker for the duration of the drag. Avoid leaking ours
-    // past the drop, where dnd would tear down its listener but not this
-    // component's.
+    const w = r?.width ?? el?.clientWidth ?? 320;
     disarmScrollBlocker();
-    if (!dnd.start(ids, label, listId, { clientX: x, clientY: y }, rowWidth(), r)) return;
-    lock = "reorder";
+    if (!dnd.start(ids, label, listId, { clientX: x, clientY: y }, w, r)) return;
     tapLight();
-    tx = 0;
-    cardEl?.releasePointerCapture?.(pid);
+    mainEl?.releasePointerCapture?.(pid);
   }
 
   function onDown(e: PointerEvent) {
-    // Don't let the row's gesture reach DailySection's header swipe (which
-    // pages the day on >50px horizontal moves).
     e.stopPropagation();
     if (editing || e.button === 2) return;
-    // If the press starts on a side panel (the action buttons), don't drive
-    // the swipe pipeline — let the button receive its click cleanly.
-    if (mainEl && !mainEl.contains(e.target as Node)) return;
+    // Ignore presses on interactive children (checkbox button).
+    const target = e.target as HTMLElement;
+    if (target.closest("[data-task-checkbox]")) return;
+
     active = true;
     hadDown = true;
-    lock = null;
+    lpFired = false;
+    pointerType = e.pointerType;
     startX = lastX = e.clientX;
     startY = lastY = e.clientY;
-    startTx = tx;
-    lastZone = zoneOf(tx);
     modShift = e.shiftKey;
     modMeta = e.metaKey || e.ctrlKey;
     clearLp();
-    // Touch: press-and-hold starts a reorder (vertical drag is scrolling).
-    // Mouse: skip the long-press — vertical drag in onMove starts reorder
-    // immediately, because there's no native scroll gesture to compete with.
+
     if (e.pointerType !== "mouse") {
       armScrollBlocker();
       lpTimer = setTimeout(() => {
-        if (!active || lock !== null) return;
-        startReorder(lastX, lastY, e.pointerId);
+        if (!active) return;
+        lpFired = true;
+        bulkCtx = multi.has(task.id) && multi.size > 1;
+        const r = el?.getBoundingClientRect();
+        const mx = r ? r.left + r.width / 2 : lastX;
+        const my = r ? r.bottom : lastY;
+        openMenu(mx, my);
       }, 450);
     }
   }
 
   function onMove(e: PointerEvent) {
-    if (!active || lock === "reorder" || lock === "scroll") return;
+    if (!active) return;
     lastX = e.clientX;
     lastY = e.clientY;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
+    const moved = Math.abs(dx) > 5 || Math.abs(dy) > 5;
+    if (!moved) return;
 
-    if (lock === null) {
-      // Any real movement means this is a drag, not a press-and-hold — kill
-      // the reorder timer immediately so a slow/paused drag never snaps back.
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) clearLp();
-
-      const ax = Math.abs(dx);
-      const ay = Math.abs(dy);
-      // Require *dominant* horizontal motion before claiming a swipe, so a
-      // vertical touch scroll with normal finger jitter doesn't get hijacked.
-      // Vertical wins as soon as it crosses the 8px threshold (the browser
-      // will already have taken over native pan-y for touch).
-      if (ay > 8 && ay >= ax) {
-        if (e.pointerType === "mouse") {
-          startReorder(e.clientX, e.clientY, e.pointerId);
-        } else {
-          lock = "scroll"; // let the page scroll natively
-        }
-        return;
-      }
-      if (ax > 10 && ax > ay * 1.5) {
-        lock = "swipe";
-        settling = false;
-        cardEl?.setPointerCapture?.(e.pointerId);
-      } else {
-        return;
-      }
+    if (e.pointerType === "mouse") {
+      // Web: any movement starts drag immediately.
+      active = false;
+      startReorder(e.clientX, e.clientY, e.pointerId);
+      return;
     }
 
-    if (lock === "swipe") {
-      e.preventDefault();
-      const t = trayW();
-      tx = clamp(startTx + dx, -t, t);
-      const z = zoneOf(tx);
-      if (z !== lastZone) {
-        selection();
-        lastZone = z;
-      }
+    // Touch/pen: movement before long-press → scroll (let the browser pan).
+    if (!lpFired) {
+      active = false;
+      clearLp();
+      disarmScrollBlocker();
+      return;
     }
-  }
 
-  function settle() {
-    const zone = zoneOf(tx);
-    if (tx > 0) {
-      if (zone === 2) {
-        handleToggle();
-        closeTray({ ease: SETTLE_EASE });
-      } else if (zone === 1) {
-        animateTo(PEEK_LEFT);
-        swipeOpen.id = task.id;
-        tapMedium();
-      } else {
-        closeTray();
-      }
-    } else if (tx < 0) {
-      if (zone === 2) {
-        askDelete();
-        closeTray({ ease: SETTLE_EASE });
-      } else if (zone === 1) {
-        animateTo(-PEEK_RIGHT);
-        swipeOpen.id = task.id;
-        tapMedium();
-      } else {
-        closeTray();
-      }
-    }
+    // Touch/pen after long-press: movement closes the menu and starts drag.
+    active = false;
+    menuOpen = false;
+    startReorder(e.clientX, e.clientY, e.pointerId);
   }
 
   function onUp(e: PointerEvent) {
     const wasDown = hadDown;
+    const wasLp = lpFired;
     active = false;
     hadDown = false;
+    lpFired = false;
     clearLp();
-    cardEl?.releasePointerCapture?.(e.pointerId);
-    if (lock === "swipe") {
-      settle();
-    } else if (lock === null && wasDown) {
-      const moved = Math.abs(lastX - startX) > 6 || Math.abs(lastY - startY) > 6;
-      if (!moved) {
-        if (tx !== 0) {
-          closeTray();
-        } else if (modShift) {
-          multi.rangeFromAnchor(orderedIds, task.id, listId);
-        } else if (modMeta) {
-          multi.toggle(task.id, listId);
-        } else {
-          // Plain click: clear any existing selection, then edit.
-          if (multi.active) multi.clear();
-          startEdit();
-        }
-      }
+    disarmScrollBlocker();
+    mainEl?.releasePointerCapture?.(e.pointerId);
+    if (!wasDown) return;
+    const moved = Math.abs(lastX - startX) > 6 || Math.abs(lastY - startY) > 6;
+    if (moved) return;
+    if (wasLp) return; // long-press already opened the menu; tap-up does nothing
+    if (modShift) {
+      multi.rangeFromAnchor(orderedIds, task.id, listId);
+    } else if (modMeta) {
+      multi.toggle(task.id, listId);
+    } else {
+      if (multi.active) multi.clear();
+      startEdit();
     }
-    lock = null;
   }
 
   function onCancel(e: PointerEvent) {
     active = false;
     hadDown = false;
+    lpFired = false;
     clearLp();
-    cardEl?.releasePointerCapture?.(e.pointerId);
-    // pointercancel can come from a system interruption (notification,
-    // browser-back swipe) or, occasionally, from the end of a fast user
-    // flick. Either way auto-firing delete/complete is the wrong default —
-    // we'd rather drop the action and let the user retry than nuke a task
-    // on a flick they didn't realise had crossed the trigger. A light tap
-    // acknowledges the dropped gesture so it doesn't feel silent.
-    if (lock === "swipe" && tx !== 0) {
-      closeTray();
-      tapLight();
-    }
-    lock = null;
+    disarmScrollBlocker();
+    mainEl?.releasePointerCapture?.(e.pointerId);
   }
 
-  // Trackpad two-finger swipe arrives as `wheel` events. macOS keeps firing a
-  // decaying momentum tail for ~1s after the fingers lift, so we track the
-  // peak delta and treat the shrinking tail as "gesture ended", then swallow
-  // the remaining momentum during a short cooldown so it can't re-settle.
-  let wheelPeak = 0;
-  let wheelLast = 0;
-  let wheelCooldownUntil = 0;
-
-  function handleWheel(e: WheelEvent) {
-    if (editing || Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-    e.preventDefault();
-    const now = performance.now();
-    if (now < wheelCooldownUntil) return; // ignore the momentum tail
-
-    if (now - wheelLast > 200) wheelPeak = 0; // a fresh gesture
-    wheelLast = now;
-    const ad = Math.abs(e.deltaX);
-    wheelPeak = Math.max(wheelPeak, ad);
-
-    settling = false;
-    // Clamp to the tray width — the strip can't slide further without
-    // exposing a blank edge. Trigger threshold is 0.85·tray, reachable
-    // from a real flick. Momentum is swallowed below.
-    const t = trayW();
-    tx = clamp(tx - e.deltaX, -t, t);
-    const z = zoneOf(tx);
-    if (z !== lastZone) {
-      selection();
-      lastZone = z;
-    }
-
-    // Decaying tail → the active swipe is over. Settle now and lock out the
-    // remaining momentum events.
-    if (wheelPeak > 8 && ad < wheelPeak * 0.2) {
-      if (wheelTimer) clearTimeout(wheelTimer);
-      wheelCooldownUntil = now + 350;
-      settle();
-      return;
-    }
-    // Fallback for an abrupt stop with no momentum tail.
-    if (wheelTimer) clearTimeout(wheelTimer);
-    wheelTimer = setTimeout(settle, 160);
-  }
-
-  // Snap shut when another row opens, when a reorder starts, or on scroll.
-  $effect(() => {
-    const open = swipeOpen.id;
-    if (open !== task.id)
-      untrack(() => {
-        if (tx !== 0 && lock !== "swipe") animateTo(0);
-      });
-  });
-  $effect(() => {
-    if (dnd.active && !dnd.has(task.id))
-      untrack(() => {
-        if (tx !== 0) animateTo(0);
-      });
-  });
-  $effect(() => {
-    function onScroll() {
-      if (tx !== 0 && lock !== "swipe") closeTray();
-    }
-    window.addEventListener("scroll", onScroll, true);
-    return () => window.removeEventListener("scroll", onScroll, true);
-  });
-
-  // Tapping the revealed strip / buttons.
-  function tapComplete() {
-    handleToggle();
-    closeTray();
-  }
-
-  function openOptions() {
-    const r = el?.getBoundingClientRect();
-    if (r) openMenu(r.right - 176, Math.min(r.top, window.innerHeight - 180));
-    closeTray();
-  }
-
-  function deleteFromTray() {
-    closeTray();
-    askDelete();
-  }
-
-  // ---- Action menu (right-click on desktop, "Options" from the tray) -------
+  // ---- Action menu ---------------------------------------------------------
   let menuOpen = $state(false);
   let menuX = $state(0);
   let menuY = $state(0);
   let menuEl: HTMLDivElement | undefined = $state();
+  let bulkCtx = $state(false);
 
   function openMenu(x: number, y: number) {
     menuX = x;
@@ -488,8 +245,6 @@
     tapMedium();
   }
 
-  // Clamp into the viewport after the menu has rendered, so it can never
-  // spill off the right/bottom edge regardless of where it was opened.
   $effect(() => {
     if (!menuOpen || !menuEl) return;
     const pad = 8;
@@ -500,10 +255,6 @@
     if (ny !== menuY) menuY = ny;
   });
 
-  // Right-click on a task that's part of a multi-selection opens the bulk
-  // variant of the menu (Delete N / Complete N / Uncomplete N); single-task
-  // right-click keeps the existing Edit/Duplicate/Delete menu.
-  let bulkCtx = $state(false);
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
     bulkCtx = multi.has(task.id) && multi.size > 1;
@@ -517,8 +268,6 @@
 
   // ---- Delete confirmation -------------------------------------------------
   let confirmDelete = $state(false);
-  // Captures whether the pending confirm is for the bulk selection or just
-  // this row, since `bulkCtx` itself is cleared when the menu closes.
   let confirmBulk = $state(false);
 
   function askDelete() {
@@ -539,11 +288,6 @@
   }
 
   function handleToggle() {
-    // Flip the visual state first; the haptic is fire-and-forget. The Capacitor
-    // bridge call is cheap, but the native haptic engine wake-up has been seen
-    // to briefly stall the main thread on iOS during pointerup, which makes the
-    // optimistic update in handleToggleTask paint a frame later than it should.
-    // Deferring with setTimeout(0) lets the flip render before any native work.
     const willComplete = !task.completed;
     onToggle(task);
     setTimeout(() => {
@@ -556,26 +300,17 @@
 <li
   bind:this={el}
   data-dnd-item={task.id}
-  class="group relative overflow-hidden rounded-2xl
+  class="group relative rounded-2xl
     {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}
     {isDragging ? 'opacity-30' : 'animate-fade-up'}"
   style="animation-delay: {index * 50}ms"
   oncontextmenu={handleContextMenu}
-  onwheel={handleWheel}
 >
-  <!--
-    Single 220%-wide strip holding three panels edge-to-edge:
-      [ left action 60% ][ main card 100% ][ right actions 60% ]
-    The `<li>` clips overflow. The strip's resting transform is
-    `translateX(-60%·row)`, expressed in strip units as `-LEFT_PCT%`, so the
-    main card centers in the viewport. `tx` (px) is the swipe delta on top.
-  -->
   <div
-    bind:this={cardEl}
-    class="flex w-[220%]"
-    style="transform: translateX(calc(-{LEFT_PCT}% + {tx}px));
-      touch-action: pan-y;
-      transition: {settling ? `transform ${SETTLE_MS}ms ${settleEase}` : 'none'};"
+    bind:this={mainEl}
+    class="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl no-touch-select
+      {task.completed ? 'bg-[var(--color-done)]' : 'bg-[var(--color-surface)]'}"
+    style="touch-action: pan-y;"
     role="textbox"
     tabindex="0"
     onpointerdown={onDown}
@@ -584,99 +319,44 @@
     onpointercancel={onCancel}
     onkeydown={onStripKeydown}
   >
-    <!-- Left action — revealed by swiping right. Green=complete, gray=undo.
-         Icon sits at the panel's right edge (the inner edge next to the
-         main card) so it appears immediately on a small peek. -->
-    <button
-      onclick={tapComplete}
-      tabindex={-1}
-      aria-label={task.completed ? "Mark incomplete" : "Mark complete"}
-      class="shrink-0 flex items-center justify-end transition-[filter] duration-150"
-      style="width: {LEFT_PCT}%;
-        background: {task.completed ? 'var(--color-surface-3)' : 'var(--color-accent)'};
-        filter: brightness({armed > 0 ? 1.18 : 1});"
-    >
-      <div
-        class="h-full flex items-center justify-center"
-        style="width: {ICON_W}px; opacity: {leftProgress}; transform: scale({0.6 + 0.4 * leftProgress + (armed > 0 ? 0.12 : 0)});"
-      >
-        {#if task.completed}
-          <Undo2 size={18} class="text-[var(--color-ink)]" />
-        {:else}
-          <Check size={18} strokeWidth={3} class="text-[var(--color-bg)]" />
-        {/if}
+    {#if editing}
+      <RichTaskInput
+        value={task.text}
+        autofocus
+        submitOnBlur
+        flush
+        placeholder="Edit task"
+        onsubmit={commitEdit}
+        onTabNav={navigateTab}
+      />
+    {:else}
+      <div class="flex-1 min-w-0">
+        <TaskContent {task} dimmed={task.completed} />
       </div>
-    </button>
-
-    <!-- Main card -->
-    <div
-      bind:this={mainEl}
-      class="shrink-0 flex items-center gap-2.5 px-4 py-3.5 no-touch-select
-        {task.completed ? 'bg-[var(--color-done)]' : 'bg-[var(--color-surface)]'}"
-      style="width: {MAIN_PCT}%"
-    >
-      {#if editing}
-        <RichTaskInput
-          value={task.text}
-          autofocus
-          submitOnBlur
-          flush
-          placeholder="Edit task"
-          onsubmit={commitEdit}
-          onTabNav={navigateTab}
-        />
-      {:else}
-        <div class="flex-1 min-w-0">
-          <TaskContent {task} dimmed={task.completed} />
-        </div>
-      {/if}
-    </div>
-
-    <!-- Right actions — revealed by swiping left. Mirrors the action menu.
-         Buttons sit at the panel's left edge (inner edge next to the main
-         card). The Delete button stretches to fill the rest of the 60%
-         panel so a longer swipe just reveals more red. -->
-    <div
-      class="shrink-0 flex bg-[var(--color-danger)]"
-      style="width: {LEFT_PCT}%"
-    >
-      <button
-        onclick={openOptions}
-        tabindex={-1}
-        aria-label="Options"
-        class="h-full shrink-0 flex items-center justify-center bg-[var(--color-voice)] text-[var(--color-bg)]"
-        style="width: {ICON_W}px"
-      >
-        <div
-          class="flex items-center justify-center"
-          style="opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress});"
-        >
-          <MoreHorizontal size={18} />
-        </div>
-      </button>
-      <button
-        onclick={deleteFromTray}
-        tabindex={-1}
-        aria-label="Delete"
-        class="flex-1 h-full flex items-center justify-start text-white transition-[filter] duration-150"
-        style="filter: brightness({armed < 0 ? 1.18 : 1});"
-      >
-        <div
-          class="h-full flex items-center justify-center"
-          style="width: {ICON_W}px; opacity: {rightProgress}; transform: scale({0.6 + 0.4 * rightProgress + (armed < 0 ? 0.12 : 0)});"
-        >
-          <Trash2 size={18} />
-        </div>
-      </button>
-    </div>
+    {/if}
   </div>
+
+  <!-- Checkbox: extrudes slightly outside the top-left corner. -->
+  <button
+    data-task-checkbox
+    type="button"
+    onclick={handleToggle}
+    tabindex={-1}
+    aria-label={task.completed ? "Mark incomplete" : "Mark complete"}
+    class="absolute -top-1.5 -left-1.5 z-10 w-5 h-5 rounded-md flex items-center justify-center
+      border-2 transition-colors
+      {task.completed
+        ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+        : 'bg-[var(--color-bg)] border-[var(--color-ink-3)] hover:border-[var(--color-ink)]'}"
+  >
+    {#if task.completed}
+      <Check size={12} strokeWidth={3} class="text-[var(--color-bg)]" />
+    {/if}
+  </button>
 </li>
 
 {#if menuOpen}
   <div use:portal>
-    <!-- Backdrop closes the menu on any outside interaction. We close on
-         click (and absorb both pointer phases) so the gesture is consumed
-         in full before the now-uncovered element below can see its tail. -->
     <button
       aria-label="Close menu"
       class="fixed inset-0 z-40 cursor-default"

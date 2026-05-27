@@ -239,10 +239,10 @@ class Dnd {
 
     // Normalise speed to 60fps so a janky frame doesn't undershoot.
     // Assumes the task lists live in the root document scroller (true
-    // for the current layout — RangeSection/DailySection/UnscheduledSection
-    // are direct children of +page.svelte under document scroll). If a
-    // future list lands in a nested scroll container, walk up from
-    // elementFromPoint to find the nearest scrollable ancestor instead.
+    // for the current layout — BucketSection rows are direct children of
+    // +page.svelte under document scroll). If a future list lands in a
+    // nested scroll container, walk up from elementFromPoint to find the
+    // nearest scrollable ancestor instead.
     // iOS WKWebView silently no-ops `window.scrollBy` while a non-passive
     // touch is in flight; mutating scrollTop on the scrolling element
     // bypasses that path.

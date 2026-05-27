@@ -7,10 +7,6 @@ const API = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
 // the seed/owner user; revisit once we support linking chatId -> userId.
 const TELEGRAM_OWNER_USER_ID = "user_seed_vladogim97";
 
-function todayDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 async function sendMessage(chatId: number | string, text: string, options?: { reply_markup?: unknown }) {
   await fetch(`${API}/sendMessage`, {
     method: "POST",
@@ -20,18 +16,33 @@ async function sendMessage(chatId: number | string, text: string, options?: { re
 }
 
 async function getToday() {
-  const date = todayDate();
   const tasks = await prisma.task.findMany({
-    where: { date, userId: TELEGRAM_OWNER_USER_ID },
+    where: { bucket: "today", userId: TELEGRAM_OWNER_USER_ID, deletedAt: null },
     orderBy: { order: "asc" },
   });
-  return { date, tasks };
+  return { tasks };
 }
 
-function formatDayTasks(day: { date: string; tasks: { text: string; completed: boolean }[] }) {
-  if (!day.tasks.length) return `*${day.date}*\n_No tasks yet._`;
+function formatTodayTasks(day: { tasks: { text: string; completed: boolean }[] }) {
+  if (!day.tasks.length) return `*Today*\n_No tasks yet._`;
   const lines = day.tasks.map((t, i) => `${t.completed ? "~" : ""}${i + 1}. ${t.text}${t.completed ? "~" : ""}`);
-  return `*${day.date}*\n${lines.join("\n")}`;
+  return `*Today*\n${lines.join("\n")}`;
+}
+
+async function addToday(text: string) {
+  const maxOrder = await prisma.task.aggregate({
+    where: { bucket: "today", userId: TELEGRAM_OWNER_USER_ID },
+    _max: { order: true },
+  });
+  await prisma.task.create({
+    data: {
+      userId: TELEGRAM_OWNER_USER_ID,
+      text,
+      bucket: "today",
+      scheduledAt: new Date(),
+      order: (maxOrder._max.order ?? -1) + 1,
+    },
+  });
 }
 
 export async function handleTelegramUpdate(update: Record<string, unknown>) {
@@ -58,7 +69,7 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
   // /today
   if (text === "/today") {
     const day = await getToday();
-    await sendMessage(chatId, formatDayTasks(day));
+    await sendMessage(chatId, formatTodayTasks(day));
     return;
   }
 
@@ -66,23 +77,8 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
   if (text.startsWith("/add ")) {
     const taskText = text.slice(5).trim();
     if (!taskText) return sendMessage(chatId, "Usage: /add <task text>");
-
-    const date = todayDate();
-    const maxOrder = await prisma.task.aggregate({
-      where: { date, userId: TELEGRAM_OWNER_USER_ID },
-      _max: { order: true },
-    });
-
-    await prisma.task.create({
-      data: {
-        userId: TELEGRAM_OWNER_USER_ID,
-        text: taskText,
-        date,
-        order: (maxOrder._max.order ?? -1) + 1,
-      },
-    });
-
-    await sendMessage(chatId, formatDayTasks(await getToday()));
+    await addToday(taskText);
+    await sendMessage(chatId, formatTodayTasks(await getToday()));
     return;
   }
 
@@ -96,7 +92,7 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
     if (!task) return sendMessage(chatId, `Task #${num} not found.`);
 
     await prisma.task.update({ where: { id: task.id }, data: { completed: true } });
-    await sendMessage(chatId, formatDayTasks(await getToday()));
+    await sendMessage(chatId, formatTodayTasks(await getToday()));
     return;
   }
 
@@ -110,7 +106,7 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
     if (!task) return sendMessage(chatId, `Task #${num} not found.`);
 
     await prisma.task.update({ where: { id: task.id }, data: { completed: false } });
-    await sendMessage(chatId, formatDayTasks(await getToday()));
+    await sendMessage(chatId, formatTodayTasks(await getToday()));
     return;
   }
 
@@ -124,23 +120,11 @@ export async function handleTelegramUpdate(update: Record<string, unknown>) {
     if (!task) return sendMessage(chatId, `Task #${num} not found.`);
 
     await prisma.task.delete({ where: { id: task.id } });
-    await sendMessage(chatId, formatDayTasks(await getToday()));
+    await sendMessage(chatId, formatTodayTasks(await getToday()));
     return;
   }
 
   // Default: treat as a task to add
-  const date = todayDate();
-  const maxOrder = await prisma.task.aggregate({
-    where: { date, userId: TELEGRAM_OWNER_USER_ID },
-    _max: { order: true },
-  });
-  await prisma.task.create({
-    data: {
-      userId: TELEGRAM_OWNER_USER_ID,
-      text,
-      date,
-      order: (maxOrder._max.order ?? -1) + 1,
-    },
-  });
-  await sendMessage(chatId, `Added!\n\n${formatDayTasks(await getToday())}`);
+  await addToday(text);
+  await sendMessage(chatId, `Added!\n\n${formatTodayTasks(await getToday())}`);
 }

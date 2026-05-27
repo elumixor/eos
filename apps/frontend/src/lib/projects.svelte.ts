@@ -1,46 +1,59 @@
-import { api, type Project } from "$lib/api";
+import type { Project } from "$lib/api";
+import { newId } from "$lib/db/id";
+import { del, getAll, put, putMany } from "$lib/db/idb";
+import { enqueue } from "$lib/db/outbox";
+import { onPulled, sync } from "$lib/sync.svelte";
+
+// Offline-first projects store. Hydrates from IndexedDB on construction so
+// the UI renders instantly with cached rows, then `boot()` kicks off a sync
+// pull to reconcile with the server. Every mutation is applied optimistically
+// to the in-memory list + IDB, then enqueued in the outbox for the sync
+// runner to push.
 
 class ProjectsStore {
   list = $state<Project[]>([]);
   filterId = $state<string | null>(null);
   showHidden = $state(false);
-  // Bumped whenever an in-task pill tap requests a scroll. FilterBar's
-  // $effect keys off this so chip-row toggles never yank the bar.
   scrollRequestTick = $state(0);
-  // What `filterId` was before a task-pill tap activated the current filter.
-  // Re-tapping the same in-task pill restores it ("peek and pop"). Only set
-  // via `setFilterFromTask`; the chip-row `toggleFilter` keeps plain toggle
-  // semantics so the existing FilterBar UX doesn't change. Intentionally
-  // non-reactive — never rendered, only read inside the setter branch.
   private previousFilterId: string | null = null;
+  private booted = false;
 
   get visible(): Project[] {
     return this.list.filter((p) => !p.hidden);
   }
-
   get hiddenList(): Project[] {
     return this.list.filter((p) => p.hidden);
   }
-
   get filter(): Project | undefined {
     return this.list.find((p) => p.id === this.filterId);
   }
 
-  async load() {
-    this.list = await api.projects.$get();
-    // Reconcile filter pointers against the freshly-loaded list: another
-    // session may have deleted a project that we still reference, leaving a
-    // dangling id that would let `setFilterFromTask`'s pop restore a ghost
-    // filter (matches nothing, can't be cleared via the chip row).
-    const ids = new Set(this.list.map((p) => p.id));
-    if (this.filterId && !ids.has(this.filterId)) this.filterId = null;
-    if (this.previousFilterId && !ids.has(this.previousFilterId)) this.previousFilterId = null;
+  async boot() {
+    if (this.booted) return;
+    this.booted = true;
+    // Hydrate from IDB synchronously (well, one async tick). UI can render
+    // these rows immediately — no network gate.
+    const cached = await getAll<Project>("projects");
+    this.list = cached
+      .filter((p) => !(p as Project & { deletedAt?: string | null }).deletedAt)
+      .sort(byOrder);
+    // Subscribe to sync deltas — apply server changes into the live list.
+    onPulled(({ projects }) => {
+      if (!projects.length) return;
+      const map = new Map(this.list.map((p) => [p.id, p]));
+      for (const p of projects) {
+        if ((p as Project & { deletedAt?: string | null }).deletedAt) map.delete(p.id);
+        else map.set(p.id, p);
+      }
+      this.list = Array.from(map.values()).sort(byOrder);
+      this.reconcileFilters();
+    });
+    sync.schedule(0);
   }
 
   byId(id: string | null | undefined): Project | undefined {
     return id ? this.list.find((p) => p.id === id) : undefined;
   }
-
   byName(name: string): Project | undefined {
     const n = name.trim().toLowerCase();
     return this.list.find((p) => p.name.toLowerCase() === n);
@@ -49,34 +62,65 @@ class ProjectsStore {
   async create(name: string): Promise<Project> {
     const existing = this.byName(name);
     if (existing) return existing;
-    const created = await api.projects.$post({ name: name.trim() });
+    const id = newId();
+    const now = new Date().toISOString();
+    const created = {
+      id,
+      userId: "", // server fills; not used client-side
+      name: name.trim(),
+      avatarType: "auto",
+      emoji: null,
+      image: null,
+      hue: null,
+      hidden: false,
+      capitalization: "sentence",
+      order: (this.list.at(-1)?.order ?? -1) + 1,
+      parentIds: [],
+      createdAt: now,
+      updatedAt: now,
+    } as unknown as Project;
     this.list = [...this.list, created];
+    await put("projects", created);
+    await enqueue({
+      kind: "project.create",
+      id,
+      name: created.name,
+      order: created.order,
+    });
+    sync.schedule(0);
     return created;
   }
 
-  async update(
-    id: string,
-    patch: {
-      name?: string;
-      avatarType?: "auto" | "emoji" | "image";
-      emoji?: string | null;
-      image?: string | null;
-      hue?: number | null;
-      hidden?: boolean;
-      capitalization?: "sentence" | "lower" | "capitalized" | "upper";
-      parentIds?: string[];
-    },
-  ): Promise<Project> {
-    const updated = await api.projects(id).$patch(patch);
+  async update(id: string, patch: Partial<Project>): Promise<Project | undefined> {
+    const cur = this.byId(id);
+    if (!cur) return undefined;
+    const now = new Date().toISOString();
+    const updated = { ...cur, ...patch, updatedAt: now } as Project;
     this.list = this.list.map((p) => (p.id === id ? updated : p));
+    await put("projects", updated);
+    await enqueue({
+      kind: "project.update",
+      id,
+      clientUpdatedAt: cur.updatedAt as unknown as string,
+      patch: patch as never,
+    });
+    sync.schedule(0);
     return updated;
   }
 
   async remove(id: string) {
-    await api.projects(id).$delete();
+    const cur = this.byId(id);
+    if (!cur) return;
     this.list = this.list.filter((p) => p.id !== id);
     if (this.filterId === id) this.filterId = null;
     if (this.previousFilterId === id) this.previousFilterId = null;
+    await del("projects", id);
+    await enqueue({
+      kind: "project.delete",
+      id,
+      clientUpdatedAt: cur.updatedAt as unknown as string,
+    });
+    sync.schedule(0);
   }
 
   toggleFilter(id: string) {
@@ -84,16 +128,6 @@ class ProjectsStore {
     this.filterId = this.filterId === id ? null : id;
   }
 
-  // Called when a `@project` pill inside a task is tapped. Switches the
-  // active filter to that project while remembering the prior filter so a
-  // second tap on the same in-task pill pops back. If the same pill is
-  // tapped again but no prior filter exists to pop to (e.g., the user
-  // activated the filter from the chip row first), leave state alone — the
-  // user's gesture is "focus this" not "drop the filter" — and just
-  // re-request the scroll. If the targeted project is hidden, also reveal
-  // the hidden chips so the active chip + Clear button remain reachable.
-  // The reveal is intentionally sticky; a later `clearFilter()` doesn't
-  // re-hide, because the user just exposed those projects deliberately.
   setFilterFromTask(id: string) {
     if (this.filterId === id) {
       if (this.previousFilterId !== null) {
@@ -115,34 +149,34 @@ class ProjectsStore {
     this.filterId = null;
   }
 
-  // Apply a new ordering by id. Optimistically reorders the in-memory list
-  // and persists `order` values to the backend. The server is the source of
-  // truth on the next load.
   async reorder(ids: string[]) {
     const byId = new Map(this.list.map((p) => [p.id, p]));
-    const reordered = ids.map((id, i) => {
-      const p = byId.get(id);
-      return p ? ({ ...p, order: i } as Project) : null;
-    }).filter((p): p is Project => !!p);
-    // Append any items missing from `ids` (defensive — shouldn't happen).
+    const reordered: Project[] = [];
+    const now = new Date().toISOString();
+    for (let i = 0; i < ids.length; i++) {
+      const p = byId.get(ids[i]);
+      if (p) reordered.push({ ...p, order: i, updatedAt: now } as Project);
+    }
     for (const p of this.list) if (!ids.includes(p.id)) reordered.push(p);
     this.list = reordered;
-    await api.projects.reorder.$post({
-      items: ids.map((id, order) => ({ id, order })),
-    });
+    await putMany("projects", reordered);
+    for (const p of reordered) {
+      await enqueue({
+        kind: "project.update",
+        id: p.id,
+        clientUpdatedAt: now,
+        patch: { order: p.order },
+      });
+    }
+    sync.schedule(0);
   }
 
-  // Resolved parent projects of `id`, in stored order (undefined entries
-  // dropped). Used for the "parents shown below the name" UX.
   parentsOf(id: string | null | undefined): Project[] {
     const p = this.byId(id);
     if (!p) return [];
     return p.parentIds.map((pid) => this.byId(pid)).filter((x): x is Project => !!x);
   }
 
-  // Every id reachable downward (children, grandchildren, …), including `id`.
-  // Used for filtering (parent's filter sweeps in all descendants) and for
-  // cycle prevention (forbid choosing self or any descendant as a parent).
   descendantIds(id: string): Set<string> {
     const out = new Set<string>([id]);
     let added = true;
@@ -158,6 +192,16 @@ class ProjectsStore {
     }
     return out;
   }
+
+  private reconcileFilters() {
+    const ids = new Set(this.list.map((p) => p.id));
+    if (this.filterId && !ids.has(this.filterId)) this.filterId = null;
+    if (this.previousFilterId && !ids.has(this.previousFilterId)) this.previousFilterId = null;
+  }
+}
+
+function byOrder(a: { order: number }, b: { order: number }) {
+  return a.order - b.order;
 }
 
 export const projects = new ProjectsStore();

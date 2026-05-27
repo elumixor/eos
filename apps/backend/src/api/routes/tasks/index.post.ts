@@ -3,20 +3,23 @@ import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
 
+const BUCKETS = ["today", "week", "later"] as const;
+
 export default handler(
   {
     body: {
       text: z.string().min(1),
-      date: z.string().nullable().optional(),
+      bucket: z.enum(BUCKETS).optional(),
       projectId: z.string().nullable().optional(),
       startTime: z.string().nullable().optional(),
       duration: z.number().nullable().optional(),
     },
   },
-  async ({ user, body: { text, date, projectId, startTime, duration } }) => {
+  async ({ user, body: { text, bucket, projectId, startTime, duration } }) => {
     requireAuth(user);
+    const b = bucket ?? "today";
     const maxOrder = await prisma.task.aggregate({
-      where: { userId: user.id, date: date ?? null },
+      where: { userId: user.id, bucket: b },
       _max: { order: true },
     });
 
@@ -24,7 +27,8 @@ export default handler(
       data: {
         userId: user.id,
         text,
-        date: date ?? null,
+        bucket: b,
+        scheduledAt: b === "later" ? null : new Date(),
         projectId: projectId ?? null,
         startTime: startTime ? new Date(startTime) : null,
         duration: duration ?? null,

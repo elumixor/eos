@@ -1,12 +1,15 @@
-import type { Project, Section, Task } from "$lib/api";
+import type { Project } from "$lib/api";
 
 // ── Canonical token format stored inside Task.text ──────────────
 //   @project:<cuid>                      → project pill
-//   @time:YYYY-MM-DD                     → date pill (no time)
-//   @time:YYYY-MM-DDTHH:MM               → datetime pill
+//   @time:YYYY-MM-DDTHH:MM               → datetime pill (display only)
 //   @dur:<minutes>                       → duration pill
 //   @place:<urlEncodedName>|<lat>,<lng>  → Google Maps place pill
 //   @link:<urlEncodedUrl>                → external URL pill
+//
+// Date-only @time tokens are no longer used for bucketing — the bucket is
+// stored on the task. @time:YYYY-MM-DDTHH:MM survives because users still
+// add reminders / start times to a task; the date portion is informational.
 export const TOKEN_RE = /@(project|time|dur|place|link):([^\s@]+)/g;
 
 export type Segment =
@@ -130,28 +133,18 @@ export function fmtDateTime(d: Date, hasTime: boolean, atSentenceStart = true): 
 }
 
 // ── Link helpers ────────────────────────────────────────────────
-// A typed query looks like a URL if it has a scheme or a "host.tld[/...]".
-// TLD is loose (2+ letters) so we don't ship a public-suffix list.
-// Host must end in an alphabetic TLD (≥2 letters) so "1.2.3" / "v1.2" don't
-// masquerade as links.
 const URL_LIKE_RE = /^(?:https?:\/\/\S+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:\/\S*)?)$/i;
 
 export function isUrlLike(q: string): boolean {
   return URL_LIKE_RE.test(q.trim());
 }
 
-// Add https:// when the user typed a bare host or host/path.
 export function normalizeUrl(typed: string): string {
   const t = typed.trim();
   if (/^https?:\/\//i.test(t)) return t;
   return `https://${t}`;
 }
 
-// Pretty label: drop scheme + leading "www.", drop the host's final TLD
-// segment, then append " / <last path segment>" if there's a path.
-//   atmagaming.com                  → "atmagaming"
-//   github.com/elumixor/eos         → "github / eos"
-//   https://x.com/elumixor/status/1 → "x / 1"
 export function fmtLinkLabel(url: string): string {
   let s = url.replace(/^https?:\/\//i, "").replace(/^www\./i, "");
   const slash = s.indexOf("/");
@@ -174,17 +167,16 @@ export function fmtDuration(min: number): string {
 // ── Natural-language parsing for the picker ─────────────────────
 export type Suggestion = {
   type: "time" | "dur";
-  token: string; // canonical token incl. @prefix
+  token: string;
   label: string;
   detail: string;
-  score: number; // higher = more relevant
+  score: number;
 };
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 function parseDurationStr(s: string): number | null {
   const t = s.replace(/\s+/g, "").toLowerCase();
-  // 1h30, 1h30m
   let m = t.match(/^(\d+)h(\d+)m?$/);
   if (m) return Number(m[1]) * 60 + Number(m[2]);
   m = t.match(/^(\d+(?:\.\d+)?)(h|hr|hrs|hour|hours)$/);
@@ -213,7 +205,6 @@ function parseTimeStr(s: string, base: Date): Date | null {
   return null;
 }
 
-// Returns { date, hasTime } or null. `q` is one space/hyphen-free chunk.
 function parseDateChunk(q: string, now: Date): { date: Date; hasTime: boolean } | null {
   const t = q.toLowerCase();
   const d0 = new Date(now);
@@ -235,7 +226,6 @@ function parseDateChunk(q: string, now: Date): { date: Date; hasTime: boolean } 
     d0.setDate(d0.getDate() + diff);
     return { date: d0, hasTime: false };
   }
-  // d.m.y / d/m/y / d-m-y / d.m  (day-first)
   let m = t.match(/^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$/);
   if (m) {
     const day = Number(m[1]);
@@ -245,7 +235,6 @@ function parseDateChunk(q: string, now: Date): { date: Date; hasTime: boolean } 
     const d = new Date(yr, mon, day);
     if (!Number.isNaN(d.getTime())) return { date: d, hasTime: false };
   }
-  // ISO yyyy-mm-dd
   m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) return { date: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])), hasTime: false };
   return null;
@@ -282,7 +271,6 @@ export function suggestTokens(query: string, now = new Date()): Suggestion[] {
     return out;
   }
 
-  // Duration?
   const dur = parseDurationStr(q);
   if (dur != null) {
     out.push({
@@ -294,7 +282,6 @@ export function suggestTokens(query: string, now = new Date()): Suggestion[] {
     });
   }
 
-  // Split a combined chunk like "today-5pm" or "today 5pm".
   const parts = q.split(/[\s-]+/).filter(Boolean);
   let date: Date | null = null;
   let hasTime = false;
@@ -336,140 +323,42 @@ export function suggestTokens(query: string, now = new Date()): Suggestion[] {
   return out.sort((a, b) => b.score - a.score);
 }
 
-// ── Effective date & section ranges ─────────────────────────────
-const TIME_RE = /@time:([0-9T:-]+)/g;
+// ── Bucket helpers ──────────────────────────────────────────────
+export type Bucket = "today" | "week" | "later";
 
-// Date part (YYYY-MM-DD) of the last @time token in the text, or null.
-export function explicitDate(text: string): string | null {
-  let iso: string | null = null;
-  for (const m of text.matchAll(TIME_RE)) {
-    const p = parseISO(m[1]);
-    if (p) iso = localISO(p.date, false);
-  }
-  return iso;
+// What the user sees: the stored bucket may roll into "overdue" if its
+// scheduled stamp is older than the current period (calendar day for
+// "today", current week for "week"). "later" never rolls over.
+export type DisplayBucket = Bucket | "overdue";
+
+function startOfDay(d: Date): Date {
+  const c = new Date(d);
+  c.setHours(0, 0, 0, 0);
+  return c;
 }
 
-// The date a task belongs to: explicit @time chip wins, else the stored
-// implicit `date`, else null (unscheduled).
-export function effectiveDate(task: Pick<Task, "text" | "date">): string | null {
-  return explicitDate(task.text) ?? task.date ?? null;
+// Monday-start week. The settings hook can swap this later; for now Monday
+// matches the user's locale. Returns 00:00 on Monday of the week containing d.
+function startOfWeek(d: Date): Date {
+  const c = startOfDay(d);
+  const dow = c.getDay(); // 0=Sun ... 6=Sat
+  const offset = (dow + 6) % 7; // days since Monday
+  c.setDate(c.getDate() - offset);
+  return c;
 }
 
-// Insert / rewrite / remove the single @time token. When only the date
-// changes and the old token had a time-of-day, that time is preserved.
-export function setTaskDate(text: string, dateStr: string | null): string {
-  let oldTime: string | null = null;
-  for (const m of text.matchAll(TIME_RE)) {
-    const p = parseISO(m[1]);
-    if (p?.hasTime) oldTime = `${pad(p.date.getHours())}:${pad(p.date.getMinutes())}`;
-    else oldTime = null;
-  }
-  const stripped = text
-    .replace(TIME_RE, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-  if (dateStr === null) return stripped;
-  const token = oldTime ? `@time:${dateStr}T${oldTime}` : `@time:${dateStr}`;
-  return stripped ? `${stripped} ${token}` : token;
-}
-
-// ── Date math (all on local YYYY-MM-DD strings) ─────────────────
-function todayISO(now = new Date()): string {
-  return localISO(now, false);
-}
-
-function fromISO(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function addDays(s: string, n: number): string {
-  const d = fromISO(s);
-  d.setDate(d.getDate() + n);
-  return localISO(d, false);
-}
-
-function addUnit(s: string, unit: string, n: number): string {
-  const d = fromISO(s);
-  if (unit === "day") d.setDate(d.getDate() + n);
-  else if (unit === "week") d.setDate(d.getDate() + n * 7);
-  else if (unit === "month") d.setMonth(d.getMonth() + n);
-  else if (unit === "year") d.setFullYear(d.getFullYear() + n);
-  return localISO(d, false);
-}
-
-// Inclusive [start, end] for a section, resolved relative to `now`.
-export function resolveRange(
-  section: Pick<Section, "rangeKind" | "unit" | "count" | "offset" | "startDate" | "endDate">,
+export function displayBucket(
+  task: { bucket: string; scheduledAt: string | Date | null; completed: boolean },
   now = new Date(),
-): { start: string; end: string } {
-  const today = todayISO(now);
-
-  if (section.rangeKind === "absolute") {
-    return { start: section.startDate ?? today, end: section.endDate ?? section.startDate ?? today };
+): DisplayBucket {
+  const b = task.bucket as Bucket;
+  if (b === "later" || task.completed || !task.scheduledAt) {
+    return b === "today" || b === "week" ? b : "later";
   }
-
-  if (section.rangeKind === "relative") {
-    const unit = section.unit ?? "day";
-    const count = Math.max(1, section.count ?? 1);
-    return { start: today, end: addDays(addUnit(today, unit, count), -1) };
+  const sched = typeof task.scheduledAt === "string" ? new Date(task.scheduledAt) : task.scheduledAt;
+  if (b === "today") {
+    return sched < startOfDay(now) ? "overdue" : "today";
   }
-
-  // calendar: this/next/last week|month|year (offset units away)
-  const unit = section.unit ?? "week";
-  const off = section.offset ?? 0;
-  const d = fromISO(today);
-  if (unit === "day") {
-    const day = addDays(today, off);
-    return { start: day, end: day };
-  }
-  if (unit === "week") {
-    const toMon = (d.getDay() + 6) % 7;
-    const start = addDays(addDays(today, -toMon), off * 7);
-    return { start, end: addDays(start, 6) };
-  }
-  if (unit === "month") {
-    const s = new Date(d.getFullYear(), d.getMonth() + off, 1);
-    const e = new Date(d.getFullYear(), d.getMonth() + off + 1, 0);
-    return { start: localISO(s, false), end: localISO(e, false) };
-  }
-  // year
-  const s = new Date(d.getFullYear() + off, 0, 1);
-  const e = new Date(d.getFullYear() + off, 11, 31);
-  return { start: localISO(s, false), end: localISO(e, false) };
-}
-
-export function inRange(dateStr: string, r: { start: string; end: string }): boolean {
-  return dateStr >= r.start && dateStr <= r.end;
-}
-
-type RangeSpec = {
-  rangeKind: "calendar" | "relative" | "absolute";
-  unit?: "day" | "week" | "month" | "year" | null;
-  count?: number | null;
-  offset?: number;
-};
-
-// Free-text presets used by the section editor:
-//   "this week", "next month", "last year", "next 3 weeks", "next 5 days"
-export function parseRangeQuery(input: string): RangeSpec | null {
-  const q = input.trim().toLowerCase();
-  const units = ["day", "week", "month", "year"] as const;
-  const unitOf = (w: string) => units.find((u) => w === u || w === `${u}s`) ?? null;
-
-  let m = q.match(/^(this|next|last)\s+(day|week|month|year)s?$/);
-  if (m) {
-    const unit = m[2] as RangeSpec["unit"];
-    const offset = m[1] === "this" ? 0 : m[1] === "next" ? 1 : -1;
-    return { rangeKind: "calendar", unit, offset };
-  }
-  if (q === "today") return { rangeKind: "calendar", unit: "day", offset: 0 };
-  if (q === "tomorrow") return { rangeKind: "calendar", unit: "day", offset: 1 };
-
-  m = q.match(/^next\s+(\d+)\s+(day|week|month|year)s?$/);
-  if (m) {
-    const unit = unitOf(m[2]);
-    if (unit) return { rangeKind: "relative", unit, count: Number(m[1]) };
-  }
-  return null;
+  // "week"
+  return sched < startOfWeek(now) ? "overdue" : "week";
 }

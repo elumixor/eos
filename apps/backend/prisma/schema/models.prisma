@@ -5,28 +5,9 @@ model User {
   // existing row), so `email IS NULL` doubles as the anonymous marker.
   email     String?  @unique
   name      String?
-  sections  Section[]
   projects  Project[]
   tasks     Task[]
   createdAt DateTime @default(now())
-}
-
-model Section {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String
-  rangeKind String // calendar | relative | absolute
-  unit      String? // day | week | month | year  (calendar/relative)
-  count     Int? // relative: N units
-  offset    Int      @default(0) // calendar: 0=this, 1=next, -1=last
-  startDate String? // absolute YYYY-MM-DD
-  endDate   String? // absolute YYYY-MM-DD
-  order     Int      @default(0)
-  collapsed Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  @@index([userId])
 }
 
 model Project {
@@ -45,9 +26,12 @@ model Project {
   children   ProjectParent[] @relation("ParentToChildren")
   tasks      Task[]
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
 
   @@unique([userId, name])
   @@index([userId])
+  @@index([userId, updatedAt])
 }
 
 // DAG: a project can have any number of parents (and children).
@@ -63,19 +47,27 @@ model ProjectParent {
 }
 
 model Task {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  text      String
-  completed Boolean   @default(false)
-  order     Int       @default(0)
-  date      String? // YYYY-MM-DD effective scheduled date; null = unscheduled
-  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  projectId String?
-  startTime DateTime?
-  duration  Int? // minutes
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  text        String
+  completed   Boolean   @default(false)
+  order       Int       @default(0)
+  // Which fixed bucket the task lives in: "today" | "week" | "later".
+  // "overdue" is purely derived (today/week tasks whose scheduledAt period
+  // has passed and that are still incomplete) — never written.
+  bucket      String    @default("later")
+  // Stamped whenever bucket is set to "today" or "week". Used to decide
+  // whether such a task should appear in the Overdue display bucket.
+  scheduledAt DateTime?
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectId   String?
+  startTime   DateTime?
+  duration    Int? // minutes
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
 
   @@index([userId])
+  @@index([userId, updatedAt])
 }

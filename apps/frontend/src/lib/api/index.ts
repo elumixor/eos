@@ -1,2 +1,2 @@
 export { api } from "./client";
-export type { Project, Section, Task } from "./types";
+export type { Bucket, Project, Task } from "./types";

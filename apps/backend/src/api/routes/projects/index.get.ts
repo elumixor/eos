@@ -7,7 +7,7 @@ import { handler } from "utils";
 export default handler(async ({ user }) => {
   requireAuth(user);
   const list = await prisma.project.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, deletedAt: null },
     orderBy: [{ order: "asc" }, { createdAt: "asc" }],
     include: { parents: { select: { parentId: true } } },
   });

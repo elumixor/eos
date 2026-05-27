@@ -6,14 +6,10 @@ import { handler } from "utils";
 
 const OPENAI_API = "https://api.openai.com/v1";
 
-function todayDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function allTasks(userId: string) {
   return prisma.task.findMany({
-    where: { userId },
-    orderBy: [{ date: "asc" }, { order: "asc" }],
+    where: { userId, deletedAt: null },
+    orderBy: [{ bucket: "asc" }, { order: "asc" }],
   });
 }
 
@@ -60,17 +56,18 @@ export default handler(async ({ user, event }) => {
 
   // 2. Give the model the current task lists (with ids) so it can act on
   //    them, then ask it for a list of mutations to apply.
-  const today = todayDate();
   const flat = await allTasks(user.id);
-  const todayTasks = flat.filter((t) => t.date === today);
-  const unscheduledTasks = flat.filter((t) => t.date === null);
+  const todayTasks = flat.filter((t) => t.bucket === "today");
+  const weekTasks = flat.filter((t) => t.bucket === "week");
+  const laterTasks = flat.filter((t) => t.bucket === "later");
 
   const fmt = (t: { id: string; text: string; completed: boolean }) =>
     `- [${t.completed ? "x" : " "}] (id: ${t.id}) ${t.text}`;
 
   const context = [
     `Today's tasks:\n${todayTasks.map(fmt).join("\n") || "(none)"}`,
-    `Unscheduled tasks:\n${unscheduledTasks.map(fmt).join("\n") || "(none)"}`,
+    `This week's tasks:\n${weekTasks.map(fmt).join("\n") || "(none)"}`,
+    `Later tasks:\n${laterTasks.map(fmt).join("\n") || "(none)"}`,
   ].join("\n\n");
 
   const systemPrompt = `You are the assistant for Eos, a daily to-do app.
@@ -90,8 +87,8 @@ Decide what changes to make to their task lists and respond with JSON only:
 
 Rules:
 - Only reference existing tasks by the exact id shown in the context.
-- New tasks are scheduled for today. To schedule for another day, include
-  an "@time:YYYY-MM-DD" token in the text (optionally "@time:YYYY-MM-DDTHH:MM").
+- New tasks default to the "today" bucket. The user has no concept of a
+  specific date anymore — only the three buckets today/week/later.
 - A single utterance can map to multiple actions (e.g. add three tasks).
 - If the request is ambiguous or you cannot map it to any action, return
   "actions": [] and put a short clarifying question in "message".
@@ -137,14 +134,15 @@ ${context}`;
   for (const a of actions) {
     if (a.op === "create" && a.text?.trim()) {
       const maxOrder = await prisma.task.aggregate({
-        where: { userId: user.id, date: today },
+        where: { userId: user.id, bucket: "today" },
         _max: { order: true },
       });
       await prisma.task.create({
         data: {
           userId: user.id,
           text: a.text.trim(),
-          date: today,
+          bucket: "today",
+          scheduledAt: new Date(),
           order: (maxOrder._max.order ?? -1) + 1,
         },
       });
@@ -156,7 +154,7 @@ ${context}`;
       } else if (a.op === "edit" && a.text?.trim()) {
         await prisma.task.update({ where: { id: a.id }, data: { text: a.text.trim() } });
       } else if (a.op === "delete") {
-        await prisma.task.delete({ where: { id: a.id } });
+        await prisma.task.update({ where: { id: a.id }, data: { deletedAt: new Date() } });
       }
     }
   }

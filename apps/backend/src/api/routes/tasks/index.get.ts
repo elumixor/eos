@@ -5,7 +5,7 @@ import { handler } from "utils";
 export default handler(({ user }) => {
   requireAuth(user);
   return prisma.task.findMany({
-    where: { userId: user.id },
-    orderBy: [{ date: "asc" }, { order: "asc" }],
+    where: { userId: user.id, deletedAt: null },
+    orderBy: [{ bucket: "asc" }, { order: "asc" }],
   });
 });
