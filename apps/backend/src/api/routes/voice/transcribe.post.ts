@@ -1,5 +1,5 @@
 import { createGateway } from "@ai-sdk/gateway";
-import { Output, streamText } from "ai";
+import { streamText } from "ai";
 import { env } from "env";
 import { readFormData } from "h3";
 import { requireAuth } from "services/auth";
@@ -24,9 +24,8 @@ const actionSchema = z.object({
   text: z.string().optional(),
 });
 
-const replySchema = z.object({
+const tailSchema = z.object({
   transcript: z.string(),
-  message: z.string(),
   actions: z.array(actionSchema),
 });
 
@@ -75,22 +74,20 @@ export default handler(async function* ({ user, event }) {
     })
     .join("\n\n");
 
+  // We stream raw text so the user-facing reply appears token-by-token,
+  // then a marker, then JSON for transcript + actions. Structured output
+  // with Output.object buffered the whole reply, killing the live feel.
   const systemPrompt = `You are the assistant for PureType, a daily to-do app.
-The user spoke a command. Listen to the attached audio, decide what changes
-to make to their task lists, and respond with a JSON object:
+Listen to the attached audio and respond in this EXACT format:
 
-- "transcript": exact transcription of what the user said, in their language.
-- "message": short reply (one sentence) in the SAME language the user spoke.
-  Never empty. A confirmation, clarifying question, or brief acknowledgement.
-- "actions": list of operations. Each: { op, id?, text? }. Ops:
-    create  — needs text
-    complete / uncomplete / delete — needs an existing id
-    edit    — needs an existing id and new text
+<one short reply sentence to the user, in the SAME language they spoke>
+<<<ACTIONS>>>
+{"transcript": "<exact transcription>", "actions": [{ "op": "...", "id"?: "...", "text"?: "..." }]}
 
-Rules:
-- Only reference tasks by the exact id shown below.
-- New tasks default to the "today" bucket.
-- A single utterance can map to multiple actions.
+Ops: create (needs text), complete/uncomplete/delete (needs existing id),
+edit (needs existing id + new text). Only reference tasks by the exact ids
+below. New tasks default to "today". A single utterance can map to multiple
+actions. The reply sentence must never be empty.
 
 Current state:
 ${context}`;
@@ -115,20 +112,55 @@ ${context}`;
         ],
       },
     ],
-    output: Output.object({ schema: replySchema }),
   });
 
-  let emitted = 0;
-  for await (const partial of stream.partialOutputStream) {
-    const msg = partial.message ?? "";
-    if (msg.length > emitted) {
-      yield { type: "message" as const, text: msg.slice(emitted) };
-      emitted = msg.length;
+  const MARKER = "<<<ACTIONS>>>";
+  let buffer = "";
+  let messageEmitted = 0;
+  let markerSeen = false;
+
+  for await (const chunk of stream.textStream) {
+    buffer += chunk;
+    if (markerSeen) continue;
+    const idx = buffer.indexOf(MARKER);
+    if (idx >= 0) {
+      // Emit the rest of the message text up to the marker, then stop.
+      if (idx > messageEmitted) {
+        yield { type: "message" as const, text: buffer.slice(messageEmitted, idx) };
+      }
+      messageEmitted = idx;
+      markerSeen = true;
+      continue;
+    }
+    // Hold back the tail in case the marker is being assembled across chunks.
+    const safe = Math.max(0, buffer.length - MARKER.length);
+    if (safe > messageEmitted) {
+      yield { type: "message" as const, text: buffer.slice(messageEmitted, safe) };
+      messageEmitted = safe;
     }
   }
 
-  const final = await stream.output;
-  const actions = final.actions ?? [];
+  const markerIdx = buffer.indexOf(MARKER);
+  const messageText = (markerIdx >= 0 ? buffer.slice(0, markerIdx) : buffer).trim();
+  const tailRaw = markerIdx >= 0 ? buffer.slice(markerIdx + MARKER.length).trim() : "";
+  // Strip an accidental ```json fence if the model adds one.
+  const tailJson = tailRaw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "");
+  let transcript = "";
+  let actions: z.infer<typeof actionSchema>[] = [];
+  if (tailJson) {
+    try {
+      const parsed = tailSchema.safeParse(JSON.parse(tailJson));
+      if (parsed.success) {
+        transcript = parsed.data.transcript;
+        actions = parsed.data.actions;
+      }
+    } catch {
+      // Bad JSON from the model — fall through with no actions. The user
+      // still sees the reply text we streamed.
+    }
+  }
   const validIds = new Set(flat.map((t) => t.id));
 
   const creates = actions.flatMap((a) => {
@@ -173,8 +205,7 @@ ${context}`;
   ]);
 
   return {
-    transcription: final.transcript ?? "",
-    message: final.message ?? "",
-    tasks: await allTasks(user.id),
+    transcription: transcript,
+    message: messageText,
   };
 });

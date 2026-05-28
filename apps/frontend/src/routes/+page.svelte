@@ -8,6 +8,7 @@
   import { selection as multi } from "$lib/selection.svelte";
   import { projects } from "$lib/projects.svelte";
   import { tasks as tasksStore } from "$lib/tasks.svelte";
+  import { sync } from "$lib/sync.svelte";
   import { displayBucket, extractFields, projectIds, type DisplayBucket } from "$lib/tokens";
   import { ls } from "$lib/storage";
   import BucketSection from "$lib/components/BucketSection.svelte";
@@ -15,6 +16,7 @@
   import TopBar from "$lib/components/TopBar.svelte";
   import TaskContent from "$lib/components/TaskContent.svelte";
   import VoiceButton from "$lib/components/VoiceButton.svelte";
+  import VoiceVisualizer from "$lib/components/VoiceVisualizer.svelte";
   import BoxSelect from "$lib/components/BoxSelect.svelte";
   import Toast from "$lib/components/Toast.svelte";
   import { toasts } from "$lib/toast.svelte";
@@ -24,6 +26,8 @@
   const tasks = $derived(tasksStore.list);
   let voiceLoading = $state(false);
   let voiceMessage = $state<string | null>(null);
+  let voiceRecording = $state(false);
+  let voiceStream = $state<MediaStream | null>(null);
   // Conversation context for the voice agent. Lives in memory only and
   // resets when the user dismisses the response panel.
   let voiceHistory = $state<{ transcript: string; message: string }[]>([]);
@@ -284,6 +288,8 @@
           { transcript: result.transcription ?? "", message: result.message ?? "" },
         ].slice(-VOICE_HISTORY_MAX);
       }
+      // Server applied task ops directly; pull the deltas so the UI reflects them.
+      void sync.runNow();
     } catch {
       voiceMessage = "Something went wrong processing that. Please try again.";
     } finally {
@@ -359,29 +365,33 @@
       bg-[linear-gradient(to_top,var(--color-bg)_0%,var(--color-bg)_75%,transparent_100%)]"
     style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));"
   >
-    {#if voiceMessage || voiceLoading}
+    {#if voiceMessage || voiceLoading || voiceRecording}
       <div
         class="relative px-4 pt-3 pb-6 -mb-4 rounded-t-2xl bg-[var(--color-accent)]
           border border-b-0 border-[var(--color-accent)] animate-fade-up"
       >
-        <div class="flex items-start gap-3">
-          <p
-            class="flex-1 min-h-[18px] text-[13px] font-light leading-relaxed text-white
-              whitespace-pre-wrap"
-          >
-            {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-white animate-pulse"></span>{/if}
-          </p>
-          {#if !voiceLoading && voiceMessage}
-            <button
-              onclick={dismissVoice}
-              aria-label="Dismiss"
-              class="shrink-0 p-1 -mt-0.5 rounded-lg text-white/70 hover:text-white
-                hover:bg-white/10 transition-colors"
+        {#if voiceRecording}
+          <VoiceVisualizer stream={voiceStream} />
+        {:else}
+          <div class="flex items-start gap-3">
+            <p
+              class="flex-1 min-h-[18px] text-[13px] font-light leading-relaxed text-white
+                whitespace-pre-wrap"
             >
-              <X size={14} />
-            </button>
-          {/if}
-        </div>
+              {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-white animate-pulse"></span>{/if}
+            </p>
+            {#if !voiceLoading && voiceMessage}
+              <button
+                onclick={dismissVoice}
+                aria-label="Dismiss"
+                class="shrink-0 p-1 -mt-0.5 rounded-lg text-white/70 hover:text-white
+                  hover:bg-white/10 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/if}
     <div class="relative">
@@ -401,6 +411,14 @@
               onRecorded={handleVoiceRecorded}
               onError={handleVoiceError}
               onTapSend={() => addInput?.submit()}
+              onStart={(s) => {
+                voiceStream = s;
+                voiceRecording = true;
+              }}
+              onStop={() => {
+                voiceRecording = false;
+                voiceStream = null;
+              }}
             />
           {/if}
         {/snippet}

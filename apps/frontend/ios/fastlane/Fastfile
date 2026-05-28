@@ -42,21 +42,10 @@ platform :ios do
     )
     profile_name = lane_context[SharedValues::SIGH_NAME]
 
-    # Manual signing for the archive step. Automatic signing in CI tries to
-    # provision new certs (hits the Apple-side cert cap) and looks for a
-    # Development profile that sigh never creates. Pinning to the profile
-    # sigh just generated avoids both problems.
-    team_id = sh("/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' " \
-                 "/dev/stdin <<< \"$(security cms -D -i " \
-                 "#{lane_context[SharedValues::SIGH_PROFILE_PATH]})\"", log: false).strip
-
-    xcargs = [
-      "CODE_SIGN_STYLE=Manual",
-      "DEVELOPMENT_TEAM=#{team_id}",
-      "PROVISIONING_PROFILE_SPECIFIER='#{profile_name}'",
-      "CODE_SIGN_IDENTITY='Apple Distribution'",
-    ]
-
+    # The App target's Release config has manual signing baked in via
+    # pbxproj (CODE_SIGN_STYLE=Manual + PROVISIONING_PROFILE_SPECIFIER).
+    # Don't pass signing flags via xcargs — they leak into SPM dep targets
+    # (AppAuth, GoogleSignIn, Facebook SDK) which can't be signed.
     build_app(
       project: PROJECT,
       scheme: SCHEME,
@@ -65,7 +54,6 @@ platform :ios do
       output_directory: "build",
       output_name: "App.ipa",
       clean: true,
-      xcargs: xcargs.join(" "),
       export_options: {
         method: "app-store",
         signingStyle: "manual",

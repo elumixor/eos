@@ -20,6 +20,7 @@
     "@capacitor/ios": "^8",
     "@capacitor/preferences": "^8.0.1",
     "@capgo/capacitor-social-login": "^8.3.22",
+    "audiomotion-analyzer": "^4.5.4",
     "backend": "workspace:*",
     "emoji-picker-element": "^1.29.1",
     "lucide-svelte": "^1.0.1"

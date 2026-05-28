@@ -6,11 +6,15 @@
     onTapSend,
     onRecorded,
     onError,
+    onStart,
+    onStop,
     compact = false,
   }: {
     onTapSend: () => void;
     onRecorded: (file: File) => void;
     onError: (message: string) => void;
+    onStart?: (stream: MediaStream) => void;
+    onStop?: () => void;
     compact?: boolean;
   } = $props();
 
@@ -76,6 +80,7 @@
     mediaRecorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
       cleanupTimers();
+      onStop?.();
       if (discard || chunks.length === 0) return;
       const type = mediaRecorder?.mimeType || mimeType || "audio/mp4";
       onRecorded(new File(chunks, `recording.${ext}`, { type }));
@@ -84,6 +89,7 @@
     mediaRecorder.start();
     recording = true;
     starting = false;
+    onStart?.(stream);
 
     // User released the button while we were still waiting on permission —
     // stop right away so the brief recording still ships.
