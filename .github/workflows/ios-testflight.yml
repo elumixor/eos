@@ -5,6 +5,10 @@ on:
     tags:
       - "ios-v*"
 
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: true
+
 jobs:
   testflight:
     runs-on: macos-15
