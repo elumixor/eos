@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and fill in. Do NOT commit.
+
+vercel_api_token = "vercel_pat_xxx"
+github_token     = "ghp_xxx"
+
+# Backend runtime secrets — values mirror apps/backend/.env.
+openai_api_key     = "sk-..."
+vercel_ai_key      = "vck_..."
+turso_database_url = "libsql://..."
+turso_auth_token   = "..."
+telegram_bot_token = "..."
+session_secret     = "..."
+google_client_id   = "...apps.googleusercontent.com"
+apple_client_id    = "com.atmagaming.eos"
+
+# Optional:
+# google_ios_client_id = "...apps.googleusercontent.com"
+# apple_web_client_id  = "com.atmagaming.eos.web"

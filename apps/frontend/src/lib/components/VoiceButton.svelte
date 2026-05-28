@@ -28,10 +28,14 @@
   let starting = false;
 
   function pickMime(): { mimeType?: string; ext: string } {
+    // Order matters: Gemini accepts mp4(AAC), mp3, wav, flac, ogg — not
+    // webm-container. iOS Safari only does mp4 anyway; on Chrome we pick mp4
+    // when available and otherwise fall back to webm (which the backend
+    // relabels as audio/ogg since both carry opus).
     const order: [string, string][] = [
-      ["audio/webm", "webm"],
       ["audio/mp4", "mp4"],
       ["audio/mpeg", "mp3"],
+      ["audio/webm", "webm"],
     ];
     for (const [mimeType, ext] of order) {
       if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(mimeType))

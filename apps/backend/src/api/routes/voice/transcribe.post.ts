@@ -1,4 +1,4 @@
-import { createOpenAI } from "@ai-sdk/openai";
+import { createGateway } from "@ai-sdk/gateway";
 import { Output, streamText } from "ai";
 import { env } from "env";
 import { readFormData } from "h3";
@@ -7,14 +7,9 @@ import { prisma } from "services/prisma";
 import { handler } from "utils";
 import { z } from "zod";
 
-const OPENAI_API = "https://api.openai.com/v1";
-
-// Route the chat call through Vercel AI Gateway — same OpenAI-compatible
-// surface, but with the gateway's observability and provider failover.
-const gateway = createOpenAI({
-  apiKey: env.VERCEL_AI_KEY,
-  baseURL: "https://ai-gateway.vercel.sh/v1",
-});
+// Vercel AI Gateway. Lets us address any provider/model via a single key
+// and get streaming + cross-provider format normalization for free.
+const gateway = createGateway({ apiKey: env.VERCEL_AI_KEY });
 
 function allTasks(userId: string) {
   return prisma.task.findMany({
@@ -30,9 +25,23 @@ const actionSchema = z.object({
 });
 
 const replySchema = z.object({
+  transcript: z.string(),
   message: z.string(),
   actions: z.array(actionSchema),
 });
+
+// Gemini-friendly media types. Browser MediaRecorder usually gives us mp4
+// on iOS/Safari and webm/opus on Chrome; we relabel webm as ogg since they
+// both carry opus and Gemini accepts ogg/opus.
+function mediaTypeFor(file: File): string {
+  const t = file.type.toLowerCase();
+  if (t.startsWith("audio/mp4") || t.includes("aac")) return "audio/aac";
+  if (t.startsWith("audio/mpeg")) return "audio/mp3";
+  if (t.startsWith("audio/wav") || t.startsWith("audio/wave")) return "audio/wav";
+  if (t.startsWith("audio/flac")) return "audio/flac";
+  if (t.startsWith("audio/webm") || t.startsWith("audio/ogg")) return "audio/ogg";
+  return "audio/ogg";
+}
 
 export default handler(async function* ({ user, event }) {
   requireAuth(user);
@@ -40,28 +49,9 @@ export default handler(async function* ({ user, event }) {
   const audioFile = formData.get("audio") as File;
   if (!audioFile) throw new Error("No audio file provided");
 
-  // 1. Transcribe. gpt-4o-mini-transcribe is faster than whisper-1 and still
-  //    multilingual; it doesn't expose a language field, so we ask the chat
-  //    model to mirror the spoken language directly.
-  const whisperForm = new FormData();
-  whisperForm.append("file", audioFile);
-  whisperForm.append("model", "gpt-4o-mini-transcribe");
-  whisperForm.append("response_format", "json");
+  const bytes = new Uint8Array(await audioFile.arrayBuffer());
+  const mediaType = mediaTypeFor(audioFile);
 
-  const transcriptionRes = await fetch(`${OPENAI_API}/audio/transcriptions`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` },
-    body: whisperForm,
-  });
-  const transcription = (await transcriptionRes.json()) as { text?: string };
-  const spoken = (transcription.text ?? "").trim();
-
-  if (!spoken) return { transcription: "", message: "", tasks: await allTasks(user.id) };
-
-  yield { type: "transcript" as const, text: spoken };
-
-  // 2. Stream the structured reply. `partialOutputStream` parses incomplete
-  //    JSON for us, so we can emit `message` deltas as they arrive.
   const flat = await allTasks(user.id);
   const fmt = (t: { id: string; text: string; completed: boolean }) =>
     `- [${t.completed ? "x" : " "}] (id: ${t.id}) ${t.text}`;
@@ -73,16 +63,16 @@ export default handler(async function* ({ user, event }) {
     .join("\n\n");
 
   const systemPrompt = `You are the assistant for Eos, a daily to-do app.
-The user gave a voice command (transcribed in their own language).
-Decide what changes to make to their task lists.
+The user spoke a command. Listen to the attached audio, decide what changes
+to make to their task lists, and respond with a JSON object:
 
-Output a JSON object with TWO fields:
+- "transcript": exact transcription of what the user said, in their language.
 - "message": short reply (one sentence) in the SAME language the user spoke.
   Never empty. A confirmation, clarifying question, or brief acknowledgement.
 - "actions": list of operations. Each: { op, id?, text? }. Ops:
     create  — needs text
-    complete / uncomplete / delete — needs existing id
-    edit    — needs existing id and new text
+    complete / uncomplete / delete — needs an existing id
+    edit    — needs an existing id and new text
 
 Rules:
 - Only reference tasks by the exact id shown below.
@@ -93,9 +83,17 @@ Current state:
 ${context}`;
 
   const stream = streamText({
-    model: gateway("openai/gpt-5.4-mini"),
+    model: gateway("google/gemini-2.5-flash"),
     system: systemPrompt,
-    prompt: spoken,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Voice command attached." },
+          { type: "file", data: bytes, mediaType },
+        ],
+      },
+    ],
     output: Output.object({ schema: replySchema }),
   });
 
@@ -112,8 +110,6 @@ ${context}`;
   const actions = final.actions ?? [];
   const validIds = new Set(flat.map((t) => t.id));
 
-  // 3. Apply actions. Batch creates with a single max-order lookup; run
-  //    everything in parallel.
   const creates = actions.flatMap((a) => {
     if (a.op !== "create") return [];
     const text = a.text?.trim();
@@ -159,7 +155,7 @@ ${context}`;
   ]);
 
   return {
-    transcription: spoken,
+    transcription: final.transcript ?? "",
     message: final.message ?? "",
     tasks: await allTasks(user.id),
   };
