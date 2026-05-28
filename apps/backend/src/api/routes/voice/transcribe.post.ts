@@ -20,18 +20,31 @@ const actionSchema = z.object({
 });
 type Action = z.infer<typeof actionSchema>;
 
-// Field order matters — JSON is generated top-to-bottom, so `reply` arrives
-// before `transcript` and `actions`. We pluck each field out of the partial
-// JSON stream as it lands, instead of waiting for the whole tool call.
+// Terminal tool — model calls it once at the very end. Reply text streams
+// token-by-token because it's the first field, and by the time the model
+// writes it, any apply() results from earlier steps are already in context.
 const recordSchema = z.object({
   reply: z
     .string()
-    .describe("Short one-sentence reply to the user, in the SAME language they spoke. Never empty."),
+    .describe(
+      "Short one-sentence reply to the user in their language. Never empty. If the user asked you to show / list / find tasks, put their ids in taskRefs and keep the reply itself short (e.g. 'Here's your list:'). Do NOT enumerate tasks as numbered text — the UI renders taskRefs as proper task chips. If a previous apply() returned any failed results, SAY SO truthfully — do not claim success.",
+    ),
   transcript: z.string().describe("Exact transcription of what the user said, in their language."),
+  taskRefs: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Ids of existing tasks to show under the reply. Use whenever the user asked to see, list, find, or review tasks. Order matters. Cap at 30.",
+    ),
+});
+
+// Mutation tool — runs each action server-side and returns per-action
+// results so the model knows whether to claim success in the reply.
+const applySchema = z.object({
   actions: z
     .array(actionSchema)
     .describe(
-      "Operations to apply. create: needs text. complete/uncomplete/delete: need id. edit: needs id and (text and/or bucket).",
+      "Operations to apply, in order. create: needs text. complete/uncomplete/delete: need an EXACT id string from a prior query() result. edit: needs id and (text and/or bucket).",
     ),
 });
 
@@ -47,16 +60,21 @@ function mediaTypeFor(file: File): string {
 
 const historySchema = z.array(z.object({ transcript: z.string(), message: z.string() }));
 
-// Read-only SQL guard. query() wraps user-supplied SQL in a CTE that shadows
-// the `Task` name with a userId-scoped, alive-only view, so any reference to
-// Task inside the query is automatically tenant-isolated. Writes / pragmas
-// are rejected outright so the CTE shadow can't be bypassed.
+// Read-only SQL guard. query() wraps user-supplied SQL in a CTE named
+// `tasks` that resolves to the current user's alive rows. We can't reuse
+// the real table name `Task` here — SQLite rejects that as a circular
+// reference. The model is told to SELECT FROM `tasks`, never from `Task`.
+// Writes / pragmas / refs to the real Task table are rejected outright.
 const FORBIDDEN_SQL = /\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace|truncate)\b/i;
+// Guard against the model bypassing tenant scoping by going straight to the
+// real Task table (any quoting / case combination).
+const RAW_TASK_REF = /\b(?:from|join)\s+("|`|\[)?task\1?\b/i;
 function isReadOnlySql(sql: string) {
   const trimmed = sql.trim().replace(/;+\s*$/, "");
   if (!trimmed) return false;
   if (trimmed.includes(";")) return false;
   if (FORBIDDEN_SQL.test(trimmed)) return false;
+  if (RAW_TASK_REF.test(trimmed)) return false;
   return /^\s*(select|with)\b/i.test(trimmed);
 }
 
@@ -96,6 +114,20 @@ export default handler(async function* ({ user, event }) {
   const historyParsed =
     typeof historyRaw === "string" ? historySchema.safeParse(JSON.parse(historyRaw)) : null;
   const history = historyParsed?.success ? historyParsed.data.slice(-10) : [];
+
+  // Client-supplied "today" (YYYY-MM-DD, user's local calendar) and tz offset
+  // in minutes (Date.prototype.getTimezoneOffset()'s sign — minutes that UTC
+  // is ahead of local). Fall back to UTC if missing.
+  const rawClientDate = formData.get("clientDate");
+  const clientDate =
+    typeof rawClientDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawClientDate)
+      ? rawClientDate
+      : new Date().toISOString().slice(0, 10);
+  const rawTz = formData.get("clientTzOffsetMin");
+  const tzOffsetMin = typeof rawTz === "string" && /^-?\d+$/.test(rawTz) ? parseInt(rawTz, 10) : 0;
+  // SQL modifier that shifts a UTC datetime to the user's local time. With
+  // getTimezoneOffset() = -120 (UTC+2), we want to ADD 120 minutes.
+  const localShift = `${-tzOffsetMin} minutes`;
 
   // Cached during the request so multiple `create`s pack consecutive orders
   // without N+1 aggregate queries.
@@ -157,52 +189,96 @@ export default handler(async function* ({ user, event }) {
     return null;
   }
 
-  const today = new Date().toISOString().slice(0, 10);
   const systemPrompt = `You are the assistant for PureType, a daily to-do app.
 
-Today is ${today} (UTC).
+Today (in the user's local timezone) is ${clientDate}.
+Use DATE('${clientDate}') for today, DATE('${clientDate}', '-1 day') for
+yesterday, etc. Never use DATE('now') — the server is UTC and will be off.
 
 You have two tools:
 
-1) query({ sql }) — read-only SELECT against the user's data. The Task table
-   is automatically scoped to the current user and excludes deleted rows.
-   Schema:
-     Task(
-       id          TEXT,
-       text        TEXT,
-       completed   INTEGER  -- 0 | 1
-       completedAt DATETIME,
-       bucket      TEXT     -- 'today' | 'week' | 'later'
-       "order"     INTEGER,
-       scheduledAt DATETIME,
-       projectId   TEXT,
-       startTime   DATETIME,
-       duration    INTEGER  -- minutes
-       createdAt   DATETIME,
-       updatedAt   DATETIME
+1) query({ sql }) — read-only SELECT against the user's data.
+   ALWAYS query the \`tasks\` view (never \`Task\` directly — that's blocked).
+   \`tasks\` is auto-scoped to the current user and excludes deleted rows.
+   Columns (scheduledDate / completedDate are already in the user's local tz):
+     tasks(
+       id             TEXT,
+       text           TEXT,
+       completed      INTEGER   -- 0 | 1
+       completedAt    DATETIME, -- UTC
+       completedDate  TEXT      -- local YYYY-MM-DD (or NULL)
+       bucket         TEXT      -- 'today' | 'week' | 'later' (stored bucket)
+       "order"        INTEGER,  -- quote because it's a reserved word
+       scheduledAt    DATETIME, -- UTC
+       scheduledDate  TEXT      -- local YYYY-MM-DD (or NULL)
+       isOverdue      INTEGER   -- 1 if today/week task whose date has passed
+       isArchived     INTEGER   -- 1 if completed AND (later OR was overdue)
+       projectId      TEXT,
+       startTime      DATETIME,
+       duration       INTEGER,
+       createdAt      DATETIME,
+       updatedAt      DATETIME
      )
-   Use DATE(col) for day comparisons. Cap broad scans with LIMIT 30.
-   Quote "order" because it's a reserved word.
 
-2) record({ reply, transcript, actions }) — terminal call, exactly once.
-     reply       — one short sentence in the user's language. Never empty.
-     transcript  — exact transcription.
-     actions     — list of mutations to apply:
-       { op: 'create',     text }
+   IMPORTANT — match what the UI shows:
+   • "today" list:    bucket='today' AND isOverdue=0 AND isArchived=0
+   • "this week":     bucket='week'  AND isOverdue=0 AND isArchived=0
+   • "later" list:    bucket='later' AND isArchived=0
+   • "overdue":       isOverdue=1
+   • "archive":       isArchived=1
+   Filter \`isArchived = 0\` for any "active" list. For day comparisons,
+   prefer \`scheduledDate\` / \`completedDate\` over DATE(scheduledAt) —
+   they're already shifted into the user's timezone. Cap scans with LIMIT 30.
+
+   Examples:
+     -- how many active tasks for today
+     SELECT COUNT(*) AS n FROM tasks WHERE bucket='today' AND isOverdue=0 AND isArchived=0;
+     -- completed yesterday (local)
+     SELECT COUNT(*) AS n FROM tasks
+       WHERE completed=1 AND completedDate=DATE('${clientDate}','-1 day');
+
+2) apply({ actions }) — mutation tool. Run this BEFORE record() whenever the
+   user asked you to change something. It returns per-action results so you
+   know what actually succeeded.
+     Action shapes:
+       { op: 'create',     text }                      // creates in today
        { op: 'complete',   id }
        { op: 'uncomplete', id }
-       { op: 'edit',       id, text?, bucket? }   // bucket moves between lists
+       { op: 'edit',       id, text?, bucket? }        // bucket moves lists
        { op: 'delete',     id }
-     New tasks default to today's list. A single utterance can map to many actions.
+     CRITICAL — for any op that takes an \`id\`, that id MUST come verbatim
+     from a query() result this turn. NEVER invent ids ('123', '456', etc).
+     If you don't have ids, query() first.
+     A single utterance can map to many actions in one apply() call.
 
-Listen to the audio, call query() if you need ids or counts, then ALWAYS call
-record() to finish — even for purely informational questions (use the answer
-as the reply and leave actions empty).`;
+3) record({ reply, transcript, taskRefs? }) — terminal call, exactly once.
+     reply       — one short sentence in the user's language. Never empty.
+                   Do NOT enumerate tasks in the reply — use taskRefs instead.
+                   If apply() returned failed results, say so truthfully —
+                   do NOT claim success.
+     transcript  — exact transcription of what the user said.
+     taskRefs    — ids of existing tasks to display under the reply. Use
+                   whenever the user asked to see, list, find, or review
+                   tasks. The UI renders these as proper task chips.
+
+Flow: query() for ids/counts → apply() for mutations → record() to finish.
+ALWAYS call record() at the end — even for informational questions (set
+the answer as reply, no apply() needed).`;
 
   const priorMessages = history.flatMap((h) => [
     { role: "user" as const, content: h.transcript },
     { role: "assistant" as const, content: h.message },
   ]);
+
+  // Declared up front because the apply() tool's execute pushes to them.
+  const yieldQueue: (
+    | { type: "message"; text: string }
+    | { type: "transcript"; text: string }
+    | { type: "task-refs"; ids: string[] }
+    | { type: "action"; task: unknown }
+    | { type: "error"; code: string; message: string; detail?: string }
+  )[] = [];
+  let actionsApplied = 0;
 
   const stream = streamText({
     model: gateway("google/gemini-2.5-flash"),
@@ -238,7 +314,34 @@ as the reply and leave actions empty).`;
             };
           }
           const escapedUserId = userId.replace(/'/g, "''");
-          const scoped = `WITH "Task" AS (SELECT * FROM "Task" WHERE "userId" = '${escapedUserId}' AND "deletedAt" IS NULL) ${sql.trim().replace(/;+\s*$/, "")} LIMIT 100`;
+          const userSql = sql.trim().replace(/;+\s*$/, "");
+          const hasLimit = /\blimit\b/i.test(userSql);
+          // The CTE adds precomputed flags + local-tz date columns so the
+          // model can match exactly what the frontend shows:
+          //   scheduledDate / completedDate — DATE() of the stored UTC value
+          //     shifted into the user's local tz
+          //   isOverdue  = bucket in (today|week) AND scheduledDate < today
+          //                AND not yet completed
+          //   isArchived = completed AND (bucket=later OR was overdue) —
+          //                these don't show up in active sections
+          const scoped =
+            `WITH tasks AS (` +
+            `SELECT *, ` +
+            `CASE WHEN scheduledAt IS NULL THEN NULL ` +
+            `  ELSE DATE(datetime(scheduledAt, '${localShift}')) END AS scheduledDate, ` +
+            `CASE WHEN completedAt IS NULL THEN NULL ` +
+            `  ELSE DATE(datetime(completedAt, '${localShift}')) END AS completedDate, ` +
+            `CASE WHEN bucket IN ('today','week') AND scheduledAt IS NOT NULL ` +
+            `  AND DATE(datetime(scheduledAt, '${localShift}')) < DATE('${clientDate}') ` +
+            `  AND completed = 0 THEN 1 ELSE 0 END AS isOverdue, ` +
+            `CASE WHEN completed = 1 AND ( ` +
+            `  bucket = 'later' OR ( ` +
+            `    bucket IN ('today','week') AND scheduledAt IS NOT NULL ` +
+            `    AND DATE(datetime(scheduledAt, '${localShift}')) < DATE('${clientDate}') ` +
+            `  ) ` +
+            `) THEN 1 ELSE 0 END AS isArchived ` +
+            `FROM "Task" WHERE "userId" = '${escapedUserId}' AND "deletedAt" IS NULL` +
+            `) ${userSql}${hasLimit ? "" : " LIMIT 100"}`;
           const t0 = Date.now();
           try {
             const rows = await prisma.$queryRawUnsafe<unknown[]>(scoped);
@@ -266,8 +369,89 @@ as the reply and leave actions empty).`;
           }
         },
       },
+      apply: {
+        description:
+          "Apply a list of mutations to the user's tasks. Returns per-action results — check them before writing the reply.",
+        inputSchema: applySchema,
+        execute: async ({ actions }) => {
+          const results: {
+            index: number;
+            op: Action["op"];
+            id?: string;
+            status: "ok" | "failed" | "skipped";
+            taskId?: string;
+            error?: string;
+          }[] = [];
+          for (let i = 0; i < actions.length; i++) {
+            const validated = actionSchema.safeParse(actions[i]);
+            if (!validated.success) {
+              const err = validated.error.issues.map((iss) => iss.message).join("; ");
+              console.warn("[voice.apply] invalid action", {
+                userId,
+                index: i,
+                candidate: actions[i],
+                issues: validated.error.issues,
+              });
+              results.push({
+                index: i,
+                op: (actions[i] as { op?: Action["op"] })?.op ?? "create",
+                status: "failed",
+                error: `Invalid action: ${err}`,
+              });
+              continue;
+            }
+            const a = validated.data;
+            try {
+              const task = await applyAction(a);
+              if (!task) {
+                results.push({
+                  index: i,
+                  op: a.op,
+                  id: a.id,
+                  status: "skipped",
+                  error: "missing required field (e.g. text for create / id for update)",
+                });
+                continue;
+              }
+              actionsApplied += 1;
+              yieldQueue.push({ type: "action" as const, task });
+              results.push({
+                index: i,
+                op: a.op,
+                id: a.id,
+                status: "ok",
+                taskId: (task as { id: string }).id,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              console.error("[voice.apply] failed", {
+                userId,
+                index: i,
+                action: a,
+                error: message,
+              });
+              // Hand the model a useful summary instead of the Prisma blob —
+              // e.g. for an unknown id, it should re-query.
+              const friendly = /No record was found/i.test(message)
+                ? `Task id "${a.id}" not found (was it from a previous turn? re-run query()).`
+                : message;
+              results.push({
+                index: i,
+                op: a.op,
+                id: a.id,
+                status: "failed",
+                error: friendly,
+              });
+            }
+          }
+          const okCount = results.filter((r) => r.status === "ok").length;
+          const failedCount = results.filter((r) => r.status === "failed").length;
+          console.info("[voice.apply] done", { userId, ok: okCount, failed: failedCount });
+          return { results, okCount, failedCount };
+        },
+      },
       record: {
-        description: "Record the reply, transcript, and list of actions to apply.",
+        description: "Record the reply, transcript, and (optional) task refs.",
         inputSchema: recordSchema,
       },
     },
@@ -284,77 +468,47 @@ as the reply and leave actions empty).`;
   let inputBuffer = "";
   let replyEmitted = "";
   let transcriptEmitted = false;
-  let actionsApplied = 0;
+  let taskRefsEmitted = false;
   let toolInput: z.infer<typeof recordSchema> | null = null;
 
-  async function flushReady(o: Record<string, unknown>, finalised: boolean) {
+  function flushReady(o: Record<string, unknown>, finalised: boolean) {
     // Reply: stream new tail as it grows.
     const reply = o.reply;
     if (typeof reply === "string" && reply.length > replyEmitted.length) {
       yieldQueue.push({ type: "message" as const, text: reply.slice(replyEmitted.length) });
       replyEmitted = reply;
     }
-    // Transcript: emit as soon as we know its string is closed. Heuristic:
-    // either parse is finalised, or the next field (`actions`) has appeared.
+    // Transcript: emit once the next field (taskRefs) has appeared OR parse
+    // is finalised — either signals the string closed.
     if (!transcriptEmitted) {
       const transcript = o.transcript;
-      const transcriptClosed = finalised || "actions" in o;
+      const transcriptClosed = finalised || "taskRefs" in o;
       if (typeof transcript === "string" && transcriptClosed) {
         yieldQueue.push({ type: "transcript" as const, text: transcript });
         transcriptEmitted = true;
       }
     }
-    // Actions: anything before the last index is committed (the next element
-    // appearing means the previous one closed). On the final parse, all are.
-    const arr = o.actions;
-    if (Array.isArray(arr)) {
-      const ready = finalised ? arr.length : arr.length - 1;
-      while (actionsApplied < ready) {
-        const candidate = arr[actionsApplied++];
-        const validated = actionSchema.safeParse(candidate);
-        if (!validated.success) {
-          console.warn("[voice.action] skipped invalid action", {
-            userId,
-            index: actionsApplied - 1,
-            candidate,
-            issues: validated.error.issues,
-          });
-          continue;
+    if (!taskRefsEmitted) {
+      const refs = o.taskRefs;
+      // The terminal record() has no later field; we only know taskRefs is
+      // closed once the whole parse finalises.
+      if (finalised) {
+        if (Array.isArray(refs)) {
+          const ids = refs.filter((x): x is string => typeof x === "string" && x.length > 0);
+          if (ids.length) yieldQueue.push({ type: "task-refs" as const, ids });
         }
-        try {
-          const result = await applyAction(validated.data);
-          if (!result) {
-            console.warn("[voice.action] no-op (missing required field)", {
-              userId,
-              action: validated.data,
-            });
-            continue;
-          }
-          yieldQueue.push({ type: "action" as const, task: result });
-        } catch (err) {
-          console.error("[voice.action] apply failed", {
-            userId,
-            action: validated.data,
-            error: err instanceof Error ? err.message : String(err),
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-        }
+        taskRefsEmitted = true;
       }
     }
   }
-
-  // We can't `yield` from inside `flushReady` because it's awaited as a
-  // helper, so it buffers events and the outer loop drains them.
-  const yieldQueue: (
-    | { type: "message"; text: string }
-    | { type: "transcript"; text: string }
-    | { type: "action"; task: unknown }
-  )[] = [];
 
   // Safety net: if the model ignores toolChoice="required" and emits plain
   // text (rare, but it has happened), surface it as the message rather than
   // returning an empty reply.
   let fallbackText = "";
+  // Captured from `error` parts on fullStream — surfaced as the user-facing
+  // message when nothing else came through (e.g. gateway 429 rate limit).
+  let streamErrorText = "";
 
   for await (const part of stream.fullStream) {
     if (part.type === "text-delta") {
@@ -391,6 +545,25 @@ as the reply and leave actions empty).`;
       console.error("[voice.stream] error part from model", {
         userId,
         error: part.error,
+      });
+      const errAny = part.error as { name?: string; statusCode?: number; message?: string };
+      let code = "model_error";
+      if (errAny?.statusCode === 429 || /rate.?limit/i.test(errAny?.message ?? "")) {
+        code = "rate_limited";
+        streamErrorText =
+          "I'm being rate-limited by the AI provider right now. Try again in a minute.";
+      } else if (errAny?.message) {
+        streamErrorText = `Something went wrong: ${errAny.message}`;
+      } else {
+        streamErrorText = "Something went wrong reaching the model.";
+      }
+      // Distinct error event so the frontend can render it differently
+      // (and still see it in the response if the connection closes).
+      yieldQueue.push({
+        type: "error" as const,
+        code,
+        message: streamErrorText,
+        detail: errAny?.message,
       });
     }
     while (yieldQueue.length) yield yieldQueue.shift()!;
@@ -444,5 +617,10 @@ as the reply and leave actions empty).`;
   return {
     transcription: finalTranscript,
     message: finalMessage,
+    // null on success; set when the model stream emitted an error part so
+    // the frontend can flag it even after the SSE connection closes.
+    error: streamErrorText
+      ? { message: streamErrorText, raw: streamErrorText }
+      : null,
   };
 });

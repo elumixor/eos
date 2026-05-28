@@ -7,7 +7,7 @@
     ".": "./generated/client/index.ts"
   },
   "scripts": {
-    "dev": "nitro dev --port 10000 --host",
+    "dev": "mkdir -p .logs && nitro dev --port 10000 --host 2>&1 | tee .logs/dev.log",
     "build": "prisma generate && nitro build",
     "prisma:generate": "prisma generate",
     "prisma:update": "bash scripts/prisma-update.sh",
