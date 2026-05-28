@@ -33,7 +33,7 @@ export default handler(
       },
     });
     if (result.count === 0) throw createError({ statusCode: 404, statusMessage: "Task not found" });
-    if (body.completed === true) trackEvent("task_completed", user.id);
+    if (body.completed === true) await trackEvent("task_completed", user.id);
     return prisma.task.findUniqueOrThrow({ where: { id: router.id } });
   },
 );

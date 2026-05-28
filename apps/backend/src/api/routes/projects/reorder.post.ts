@@ -12,9 +12,7 @@ export default handler(
   async ({ user, body: { items } }) => {
     requireAuth(user);
     await prisma.$transaction(
-      items.map(({ id, order }) =>
-        prisma.project.updateMany({ where: { id, userId: user.id }, data: { order } }),
-      ),
+      items.map(({ id, order }) => prisma.project.updateMany({ where: { id, userId: user.id }, data: { order } })),
     );
     return { ok: true };
   },

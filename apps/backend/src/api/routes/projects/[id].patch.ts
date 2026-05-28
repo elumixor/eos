@@ -29,7 +29,7 @@ export default handler(
 
     // DAG cycle guard: for each proposed parent, walking up its ancestors
     // must not reach this project.
-    if (parentIds && parentIds.length) {
+    if (parentIds?.length) {
       if (parentIds.includes(router.id)) throw new Error("A project cannot be its own parent");
       const edges = await prisma.projectParent.findMany({
         where: { child: { userId: user.id } },
@@ -44,7 +44,8 @@ export default handler(
       const seen = new Set<string>();
       const stack = [...parentIds];
       while (stack.length) {
-        const cur = stack.pop()!;
+        const cur = stack.pop();
+        if (cur === undefined) break;
         if (cur === router.id) throw new Error("Cycle: a project cannot be its own ancestor");
         if (seen.has(cur)) continue;
         seen.add(cur);

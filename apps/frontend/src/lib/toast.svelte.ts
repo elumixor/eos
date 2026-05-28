@@ -18,7 +18,11 @@ class ToastStore {
   show(message: string, kind: ToastKind = "info", ms = 3000) {
     const id = ++nextId;
     this.items = [...this.items, { id, message, kind }];
-    if (ms > 0) this.timers.set(id, setTimeout(() => this.dismiss(id), ms));
+    if (ms > 0)
+      this.timers.set(
+        id,
+        setTimeout(() => this.dismiss(id), ms),
+      );
     return id;
   }
 

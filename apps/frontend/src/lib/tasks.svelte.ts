@@ -65,9 +65,7 @@ class TasksStore {
     }
     const cur = this.byId(task.id);
     if (cur && cur.updatedAt > task.updatedAt) return;
-    this.list = cur
-      ? this.list.map((t) => (t.id === task.id ? task : t))
-      : [...this.list, task];
+    this.list = cur ? this.list.map((t) => (t.id === task.id ? task : t)) : [...this.list, task];
     await put("tasks", task);
   }
 

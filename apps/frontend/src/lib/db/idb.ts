@@ -81,7 +81,7 @@ export async function withStore<T>(
   });
 }
 
-export async function getAll<T>(storeName: "tasks" | "projects"): Promise<T[]> {
+export function getAll<T>(storeName: "tasks" | "projects"): Promise<T[]> {
   return withStore<T[]>(storeName, "readonly", (s) => s.getAll() as IDBRequest<T[]>);
 }
 
@@ -119,8 +119,10 @@ export async function clearAll(): Promise<void> {
 }
 
 export async function getMeta<T = string>(key: string): Promise<T | null> {
-  const row = await withStore<{ key: string; value: T } | undefined>("meta", "readonly", (s) =>
-    s.get(key) as IDBRequest<{ key: string; value: T } | undefined>,
+  const row = await withStore<{ key: string; value: T } | undefined>(
+    "meta",
+    "readonly",
+    (s) => s.get(key) as IDBRequest<{ key: string; value: T } | undefined>,
   );
   return row ? row.value : null;
 }

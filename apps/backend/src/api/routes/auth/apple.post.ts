@@ -99,7 +99,7 @@ export default handler(
       await mergeAnonymousUser(anonymousId, user.id);
     }
 
-    trackEvent(wasNew ? "signup" : "signin", user.id, {
+    await trackEvent(wasNew ? "signup" : "signin", user.id, {
       provider: "apple",
       mergedAnonymous: Boolean(anonymousId),
     });

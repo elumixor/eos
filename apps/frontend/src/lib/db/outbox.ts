@@ -9,31 +9,65 @@ import { withStore } from "./idb";
 // → removed on success, or → failed on terminal error (kept for inspection).
 
 export type Op =
-  | { kind: "task.create"; id: string; text: string; bucket?: Bucket;
-      scheduledAt?: string | null; projectId?: string | null;
-      startTime?: string | null; duration?: number | null; order?: number;
-      completed?: boolean }
-  | { kind: "task.update"; id: string; clientUpdatedAt: string;
+  | {
+      kind: "task.create";
+      id: string;
+      text: string;
+      bucket?: Bucket;
+      scheduledAt?: string | null;
+      projectId?: string | null;
+      startTime?: string | null;
+      duration?: number | null;
+      order?: number;
+      completed?: boolean;
+    }
+  | {
+      kind: "task.update";
+      id: string;
+      clientUpdatedAt: string;
       patch: Partial<{
-        text: string; completed: boolean; order: number; bucket: Bucket;
-        scheduledAt: string | null; projectId: string | null;
-        startTime: string | null; duration: number | null;
-      }> }
+        text: string;
+        completed: boolean;
+        order: number;
+        bucket: Bucket;
+        scheduledAt: string | null;
+        projectId: string | null;
+        startTime: string | null;
+        duration: number | null;
+      }>;
+    }
   | { kind: "task.delete"; id: string; clientUpdatedAt: string }
   | { kind: "task.restore"; id: string }
   | { kind: "task.reorder"; items: { id: string; order: number; bucket: Bucket }[] }
-  | { kind: "project.create"; id: string; name: string;
-      avatarType?: "auto" | "emoji" | "image"; emoji?: string | null;
-      image?: string | null; hue?: number | null; hidden?: boolean;
+  | {
+      kind: "project.create";
+      id: string;
+      name: string;
+      avatarType?: "auto" | "emoji" | "image";
+      emoji?: string | null;
+      image?: string | null;
+      hue?: number | null;
+      hidden?: boolean;
       capitalization?: "sentence" | "lower" | "capitalized" | "upper";
-      order?: number; parentIds?: string[] }
-  | { kind: "project.update"; id: string; clientUpdatedAt: string;
+      order?: number;
+      parentIds?: string[];
+    }
+  | {
+      kind: "project.update";
+      id: string;
+      clientUpdatedAt: string;
       patch: Partial<{
-        name: string; avatarType: "auto" | "emoji" | "image";
-        emoji: string | null; image: string | null; hue: number | null;
-        hidden: boolean; capitalization: "sentence" | "lower" | "capitalized" | "upper";
-        order: number; parentIds: string[];
-      }> }
+        name: string;
+        avatarType: "auto" | "emoji" | "image";
+        emoji: string | null;
+        image: string | null;
+        hue: number | null;
+        hidden: boolean;
+        capitalization: "sentence" | "lower" | "capitalized" | "upper";
+        order: number;
+        parentIds: string[];
+      }>;
+    }
   | { kind: "project.delete"; id: string; clientUpdatedAt: string };
 
 export type OutboxEntry = {
@@ -44,15 +78,13 @@ export type OutboxEntry = {
 };
 
 export async function enqueue(op: Op): Promise<void> {
-  await withStore("outbox", "readwrite", (s) =>
-    s.add({ status: "pending", createdAt: Date.now(), op } as OutboxEntry),
-  );
+  await withStore("outbox", "readwrite", (s) => s.add({ status: "pending", createdAt: Date.now(), op } as OutboxEntry));
 }
 
-export async function listPending(): Promise<OutboxEntry[]> {
-  return withStore<OutboxEntry[]>("outbox", "readonly", (s) =>
-    s.getAll() as IDBRequest<OutboxEntry[]>,
-  ).then((rows) => rows.filter((r) => r.status !== "failed"));
+export function listPending(): Promise<OutboxEntry[]> {
+  return withStore<OutboxEntry[]>("outbox", "readonly", (s) => s.getAll() as IDBRequest<OutboxEntry[]>).then((rows) =>
+    rows.filter((r) => r.status !== "failed"),
+  );
 }
 
 export async function markInflight(seqs: number[]): Promise<void> {

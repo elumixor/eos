@@ -1,7 +1,7 @@
 import { api } from "$lib/api/client";
 import { auth } from "$lib/auth.svelte";
 
-type Me = (typeof api.users.me.$get.$response);
+type Me = typeof api.users.me.$get.$response;
 
 let me = $state<Me | null>(null);
 let loadPromise: Promise<void> | null = null;

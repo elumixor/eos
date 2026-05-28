@@ -1,17 +1,23 @@
 <script lang="ts">
+  import { Eye, EyeOff, Settings2, X } from "lucide-svelte";
   import { untrack } from "svelte";
-  import { X, Settings2, Eye, EyeOff } from "lucide-svelte";
   import type { Project } from "$lib/api";
   import { applyCap, toCapMode } from "$lib/capitalize";
+  import { portal } from "$lib/portal";
   import { projects } from "$lib/projects.svelte";
-  import { selection, selectionEnd, selectionStart, tapMedium } from "$lib/haptics";
+  import { chipDrag } from "./filter-bar/chip-drag.svelte";
+  import { makeChipPressHandler } from "./filter-bar/chip-press";
+  import ChipMenu from "./filter-bar/ChipMenu.svelte";
+  import EditorModal from "./filter-bar/EditorModal.svelte";
   import ProjectAvatar from "./ProjectAvatar.svelte";
-  import ProjectAvatarEditor from "./ProjectAvatarEditor.svelte";
 
   let editing = $state<Project | null>(null);
   let barEl: HTMLDivElement | undefined = $state();
+  let menu = $state<{ project: Project; x: number; y: number } | null>(null);
 
-  // Scroll the bar + active chip into view on in-task-pill taps only.
+  $effect(() => chipDrag.bindBar(barEl ?? null));
+
+  // Scroll bar + active chip into view on in-task-pill taps only.
   $effect(() => {
     const tick = projects.scrollRequestTick;
     if (tick === 0) return;
@@ -24,229 +30,17 @@
     });
   });
 
-  // Portal menus/overlays out of the bar (which uses overflow-x-auto and
-  // would otherwise crop them).
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
-  }
-
-  // ── Right-click / long-press context menu ───────────────────────────
-  let menuOpen = $state(false);
-  let menuX = $state(0);
-  let menuY = $state(0);
-  let menuProject = $state<Project | null>(null);
-  let menuEl: HTMLDivElement | undefined = $state();
-
-  function openMenu(p: Project, x: number, y: number) {
-    menuProject = p;
-    menuX = x;
-    menuY = y;
-    menuOpen = true;
-  }
-
-  $effect(() => {
-    if (!menuOpen || !menuEl) return;
-    const pad = 8;
-    const r = menuEl.getBoundingClientRect();
-    const nx = Math.max(pad, Math.min(menuX, window.innerWidth - r.width - pad));
-    const ny = Math.max(pad, Math.min(menuY, window.innerHeight - r.height - pad));
-    if (nx !== menuX) menuX = nx;
-    if (ny !== menuY) menuY = ny;
-  });
-
-  function onChipContextMenu(e: MouseEvent, p: Project) {
+  const onChipPointerDown = makeChipPressHandler((project, x, y) => (menu = { project, x, y }));
+  const onChipContextMenu = (e: MouseEvent, project: Project) => {
     e.preventDefault();
-    openMenu(p, e.clientX, e.clientY);
-  }
-
-  async function toggleHiddenFromMenu() {
-    const p = menuProject;
-    menuOpen = false;
-    if (!p) return;
-    await projects.update(p.id, { hidden: !p.hidden });
-  }
-
-  function customizeFromMenu() {
-    const p = menuProject;
-    menuOpen = false;
-    if (!p) return;
-    editing = p;
-  }
-
-  // ── Pointer dispatch: tap → filter, long-press → menu, move → drag ──
-  //
-  // The chip's pointerdown stays tentative until it commits to one of:
-  //   - drag       (pointer moved > MOVE_THRESHOLD px before LONG_PRESS_MS)
-  //   - menu       (held still for LONG_PRESS_MS)
-  //   - filter     (released before either of the above fired)
-  // Right-click skips this state machine and opens the menu immediately.
-  const MOVE_THRESHOLD = 6;
-  const LONG_PRESS_MS = 450;
-
-  let pressId = $state<string | null>(null);
-  let pressTimer: ReturnType<typeof setTimeout> | null = null;
-  let pressX = 0;
-  let pressY = 0;
-  let pressedProject: Project | null = null;
-  let pressActivated = false; // true once we commit to drag or menu
-  let pressDown = false; // false once the pointer is up or cancelled
-
-  // ── Drag state ──────────────────────────────────────────────────────
-  let draggingId = $state<string | null>(null);
-  let ghostX = $state(0);
-  let ghostY = $state(0);
-  let ghostWidth = $state(0);
-  // Insertion index expressed against the currently-rendered `shown` list,
-  // with the dragged item removed. 0..shown.length-1.
-  let dropIndex = $state(0);
-  // Snapshot of the order we're actively manipulating so dropIndex maps
-  // against a stable list (the visible projects don't change during drag).
-  let dragSourceIds: string[] = [];
-
-  function startDrag(p: Project, x: number, y: number, chip: HTMLElement) {
-    draggingId = p.id;
-    const r = chip.getBoundingClientRect();
-    ghostWidth = r.width;
-    ghostX = x;
-    ghostY = y;
-    const visibleIds = (projects.showHidden ? projects.list : projects.visible).map((q) => q.id);
-    dragSourceIds = visibleIds;
-    dropIndex = visibleIds.indexOf(p.id);
-    document.documentElement.classList.add("dnd-dragging");
-    selectionStart();
-    window.addEventListener("pointermove", onDragMove, { passive: false });
-    window.addEventListener("pointerup", onDragEnd);
-    window.addEventListener("pointercancel", onDragEnd);
-  }
-
-  function onDragMove(e: PointerEvent) {
-    e.preventDefault();
-    ghostX = e.clientX;
-    ghostY = e.clientY;
-    if (!barEl || !draggingId) return;
-    const chips = [...barEl.querySelectorAll<HTMLElement>("[data-chip-id]")].filter(
-      (n) => n.dataset.chipId !== draggingId,
-    );
-    let idx = chips.length;
-    for (let i = 0; i < chips.length; i++) {
-      const r = chips[i].getBoundingClientRect();
-      if (e.clientX < r.left + r.width / 2) {
-        idx = i;
-        break;
-      }
-    }
-    if (idx !== dropIndex) {
-      dropIndex = idx;
-      selection();
-    }
-  }
-
-  async function onDragEnd() {
-    const id = draggingId;
-    document.documentElement.classList.remove("dnd-dragging");
-    window.removeEventListener("pointermove", onDragMove);
-    window.removeEventListener("pointerup", onDragEnd);
-    window.removeEventListener("pointercancel", onDragEnd);
-    selectionEnd();
-    draggingId = null;
-    if (!id) return;
-
-    // Build the new ordering over the visible slice, then merge it back
-    // into the full list (preserving hidden items' relative position when
-    // they're not part of the visible slice).
-    const without = dragSourceIds.filter((x) => x !== id);
-    without.splice(dropIndex, 0, id);
-    const beforeIds = projects.list.map((p) => p.id);
-    if (without.every((x, i) => x === dragSourceIds[i])) return; // no-op
-
-    // If we're showing everything, `without` is the full order. Otherwise
-    // splice the new visible order into the slots the visible chips
-    // currently occupy in the full list.
-    let next: string[];
-    if (projects.showHidden) {
-      next = without;
-    } else {
-      const visibleSet = new Set(dragSourceIds);
-      next = [];
-      let v = 0;
-      for (const fid of beforeIds) {
-        if (visibleSet.has(fid)) {
-          next.push(without[v++]);
-        } else {
-          next.push(fid);
-        }
-      }
-    }
-    tapMedium();
-    await projects.reorder(next);
-  }
-
-  function onChipPointerDown(e: PointerEvent, p: Project) {
-    if (e.button !== undefined && e.button !== 0) return; // ignore non-primary
-    pressId = p.id;
-    pressedProject = p;
-    pressX = e.clientX;
-    pressY = e.clientY;
-    pressActivated = false;
-    pressDown = true;
-    const chip = e.currentTarget as HTMLElement;
-    pressTimer = setTimeout(() => {
-      pressTimer = null;
-      // If the browser cancelled the pointer (e.g. native scroll committed),
-      // pressDown is false and we must not pop the menu.
-      if (pressActivated || !pressDown || !pressedProject) return;
-      pressActivated = true;
-      openMenu(pressedProject, pressX, pressY);
-    }, LONG_PRESS_MS);
-
-    const cleanup = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-      if (pressTimer) {
-        clearTimeout(pressTimer);
-        pressTimer = null;
-      }
-      pressDown = false;
-    };
-    const onMove = (me: PointerEvent) => {
-      if (pressActivated) return;
-      const dx = me.clientX - pressX;
-      const dy = me.clientY - pressY;
-      if (Math.hypot(dx, dy) < MOVE_THRESHOLD) return;
-      // Commit to drag; cancel pending menu.
-      pressActivated = true;
-      cleanup();
-      if (pressedProject) startDrag(pressedProject, me.clientX, me.clientY, chip);
-    };
-    const onUp = () => {
-      const wasActivated = pressActivated;
-      const proj = pressedProject;
-      cleanup();
-      // If we never activated drag or menu, this was a tap → toggle filter.
-      if (!wasActivated && proj) projects.toggleFilter(proj.id);
-      pressId = null;
-      pressedProject = null;
-    };
-    const onCancel = () => {
-      // Native scroll (or anything that cancels the pointer) preempts the
-      // gesture. Tear everything down without firing the tap or arming the
-      // menu.
-      cleanup();
-      pressId = null;
-      pressedProject = null;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-  }
+    menu = { project, x: e.clientX, y: e.clientY };
+  };
 </script>
 
 {#if projects.list.length > 0}
   {@const shown = projects.showHidden ? projects.list : projects.visible}
   {@const hiddenCount = projects.hiddenList.length}
-  {@const visibleNoDrag = shown.filter((p) => p.id !== draggingId)}
+  {@const visibleNoDrag = shown.filter((p) => p.id !== chipDrag.draggingId)}
   <div
     bind:this={barEl}
     class="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1"
@@ -254,16 +48,16 @@
   >
     {#each visibleNoDrag as p, i (p.id)}
       {@const activeFilter = projects.filterId === p.id}
-      {@const showSlotBefore = draggingId && dropIndex === i}
-      {#if showSlotBefore}
+      {#if chipDrag.draggingId && chipDrag.dropIndex === i}
         <div
-          class="shrink-0 rounded-full border border-dashed border-[var(--color-accent)]/50
-            bg-[var(--color-accent-dim)]/30"
-          style="width: {ghostWidth}px; height: 28px;"
+          class="shrink-0 rounded-full border border-dashed border-[var(--color-accent)]/50 bg-[var(--color-accent-dim)]/30"
+          style="width: {chipDrag.ghostWidth}px; height: 28px;"
         ></div>
       {/if}
       <div
         data-chip-id={p.id}
+        role="button"
+        tabindex="0"
         oncontextmenu={(e) => onChipContextMenu(e, p)}
         onpointerdown={(e) => onChipPointerDown(e, p)}
         class="flex items-center rounded-full border transition-colors shrink-0 select-none
@@ -291,11 +85,10 @@
         {/if}
       </div>
     {/each}
-    {#if draggingId && dropIndex === visibleNoDrag.length}
+    {#if chipDrag.draggingId && chipDrag.dropIndex === visibleNoDrag.length}
       <div
-        class="shrink-0 rounded-full border border-dashed border-[var(--color-accent)]/50
-          bg-[var(--color-accent-dim)]/30"
-        style="width: {ghostWidth}px; height: 28px;"
+        class="shrink-0 rounded-full border border-dashed border-[var(--color-accent)]/50 bg-[var(--color-accent-dim)]/30"
+        style="width: {chipDrag.ghostWidth}px; height: 28px;"
       ></div>
     {/if}
 
@@ -329,14 +122,14 @@
   </div>
 {/if}
 
-{#if draggingId}
-  {@const dp = projects.byId(draggingId)}
+{#if chipDrag.draggingId}
+  {@const dp = projects.byId(chipDrag.draggingId)}
   {#if dp}
     <div use:portal>
       <div
         class="fixed z-[80] pointer-events-none rounded-full border border-[var(--color-accent)]/40
           bg-[var(--color-accent-dim)] shadow-xl shadow-black/40"
-        style="left: {ghostX}px; top: {ghostY}px; transform: translate(-50%, -50%);"
+        style="left: {chipDrag.ghostX}px; top: {chipDrag.ghostY}px; transform: translate(-50%, -50%);"
       >
         <div class="flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 text-[12px] font-medium text-[var(--color-accent)]">
           <ProjectAvatar project={dp} size={18} />
@@ -347,59 +140,26 @@
   {/if}
 {/if}
 
-{#if menuOpen && menuProject}
-  <div use:portal>
-    <button
-      aria-label="Close menu"
-      class="fixed inset-0 z-40 cursor-default"
-      onpointerdown={(e) => e.stopPropagation()}
-      onpointerup={(e) => e.stopPropagation()}
-      onclick={() => (menuOpen = false)}
-    ></button>
-    <div
-      bind:this={menuEl}
-      class="fixed z-50 w-48 py-1.5 rounded-2xl bg-[var(--color-surface-2)]
-        border border-[var(--color-border)] shadow-xl shadow-black/40 animate-fade-in"
-      style="left: {menuX}px; top: {menuY}px;"
-    >
-      <button
-        onclick={toggleHiddenFromMenu}
-        class="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-light text-[var(--color-ink)]
-          hover:bg-[var(--color-surface-3)] transition-colors"
-      >
-        {#if menuProject.hidden}
-          <Eye size={14} class="text-[var(--color-ink-3)]" />
-          Unhide
-        {:else}
-          <EyeOff size={14} class="text-[var(--color-ink-3)]" />
-          Hide
-        {/if}
-      </button>
-      <button
-        onclick={customizeFromMenu}
-        class="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-light text-[var(--color-ink)]
-          hover:bg-[var(--color-surface-3)] transition-colors"
-      >
-        <Settings2 size={14} class="text-[var(--color-ink-3)]" />
-        Customize
-      </button>
-    </div>
-  </div>
+{#if menu}
+  <ChipMenu
+    project={menu.project}
+    x={menu.x}
+    y={menu.y}
+    onClose={() => (menu = null)}
+    onToggleHidden={async () => {
+      const p = menu?.project;
+      menu = null;
+      if (p) await projects.update(p.id, { hidden: !p.hidden });
+    }}
+    onCustomize={() => {
+      editing = menu?.project ?? null;
+      menu = null;
+    }}
+  />
 {/if}
 
 {#if editing}
-  <button
-    aria-label="Close"
-    class="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm animate-fade-in"
-    onclick={() => (editing = null)}
-  ></button>
-  <div
-    class="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[min(92vw,360px)]
-      p-5 rounded-3xl bg-[var(--color-surface-2)] border border-[var(--color-border)]
-      shadow-2xl shadow-black/50 animate-scale-in"
-  >
-    <ProjectAvatarEditor project={editing} onClose={() => (editing = null)} />
-  </div>
+  <EditorModal project={editing} onClose={() => (editing = null)} />
 {/if}
 
 <style>

@@ -1,6 +1,6 @@
-import { browser } from "$app/environment";
 import { Capacitor } from "@capacitor/core";
 import { Preferences } from "@capacitor/preferences";
+import { browser } from "$app/environment";
 
 // Thin async key/value wrapper. Uses Capacitor Preferences on native (so
 // values survive WKWebView storage purges) and localStorage on web.

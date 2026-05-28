@@ -8,6 +8,6 @@ import { handler } from "utils";
 // authenticated account.
 export default handler(async () => {
   const user = await prisma.user.create({ data: { email: null, name: null } });
-  trackEvent("signup_anonymous", user.id);
+  await trackEvent("signup_anonymous", user.id);
   return { token: createJWT(user) };
 });

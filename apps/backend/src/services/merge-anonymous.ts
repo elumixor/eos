@@ -20,9 +20,7 @@ export async function mergeAnonymousUser(anonymousId: string, targetId: string) 
     .map((p) => ({ id: p.id, name: dedupeName(p.name, targetNames) }));
 
   await prisma.$transaction([
-    ...renames.map((r) =>
-      prisma.project.update({ where: { id: r.id }, data: { name: r.name } }),
-    ),
+    ...renames.map((r) => prisma.project.update({ where: { id: r.id }, data: { name: r.name } })),
     prisma.project.updateMany({
       where: { userId: anonymousId },
       data: { userId: targetId, order: { increment: projectOffset } },

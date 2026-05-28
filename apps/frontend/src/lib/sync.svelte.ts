@@ -2,7 +2,7 @@ import { browser } from "$app/environment";
 import { api, type Project, type Task } from "$lib/api";
 import { authReady } from "$lib/auth-ready";
 import { getMeta, putMany, setMeta } from "$lib/db/idb";
-import { listPending, markFailed, markInflight, remove, type Op } from "$lib/db/outbox";
+import { listPending, markFailed, markInflight, type Op, remove } from "$lib/db/outbox";
 
 // Background sync: drains the outbox (writes) then pulls deltas (reads).
 // Runs on boot, on every outbox enqueue, on online/visibility events, and
@@ -74,7 +74,7 @@ async function drainOutbox() {
   const entries = await listPending();
   const batch = entries.filter((e) => e.status !== "failed");
   if (!batch.length) return;
-  const seqs = batch.map((e) => e.seq!).filter((s) => s !== undefined);
+  const seqs = batch.map((e) => e.seq).filter((s): s is number => s !== undefined);
   await markInflight(seqs);
 
   const ops: Op[] = batch.map((e) => e.op);
@@ -83,7 +83,8 @@ async function drainOutbox() {
   const ok: number[] = [];
   for (let i = 0; i < res.results.length; i++) {
     const r = res.results[i];
-    const seq = batch[i].seq!;
+    const seq = batch[i].seq;
+    if (seq === undefined) continue;
     if (r.ok) {
       ok.push(seq);
     } else if (r.reason === "conflict" || r.reason === "not_found") {

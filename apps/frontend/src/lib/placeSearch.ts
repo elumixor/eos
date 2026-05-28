@@ -68,8 +68,7 @@ export function placeToken(p: Pick<Place, "name" | "lat" | "lng">): string {
 //   else → Google Maps
 export function placeUrl(name: string, lat: number, lng: number): string {
   const q = encodeURIComponent(name);
-  const isIOS =
-    typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
   if (isIOS) return `https://maps.apple.com/?q=${q}&ll=${lat},${lng}`;
   return `https://www.google.com/maps/search/?api=1&query=${q}&center=${lat},${lng}`;
 }

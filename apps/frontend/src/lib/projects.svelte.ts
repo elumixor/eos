@@ -34,9 +34,7 @@ class ProjectsStore {
     // Hydrate from IDB synchronously (well, one async tick). UI can render
     // these rows immediately — no network gate.
     const cached = await getAll<Project>("projects");
-    this.list = cached
-      .filter((p) => !(p as Project & { deletedAt?: string | null }).deletedAt)
-      .sort(byOrder);
+    this.list = cached.filter((p) => !(p as Project & { deletedAt?: string | null }).deletedAt).sort(byOrder);
     // Subscribe to sync deltas — apply server changes into the live list.
     onPulled(({ projects }) => {
       if (!projects.length) return;

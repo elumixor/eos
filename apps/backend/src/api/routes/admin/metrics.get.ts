@@ -11,7 +11,9 @@ const VOICE_COST_USD = 0.003;
 
 function isAdmin(email: string | null): boolean {
   if (!email) return false;
-  const allowed = env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const allowed = env.ADMIN_EMAILS.split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
   return allowed.includes(email.toLowerCase());
 }
 
@@ -42,20 +44,19 @@ export default handler(async ({ user }) => {
   // 30-day window for DAU / activity rollups.
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  const [totalUsers, signedInUsers, anonymousUsers, totalTasks, eventTotalsRaw] =
-    await Promise.all([
-      prisma.user.count(),
-      prisma.user.count({ where: { email: { not: null } } }),
-      prisma.user.count({ where: { email: null } }),
-      prisma.task.count({ where: { deletedAt: null } }),
-      prisma.$queryRaw<EventTotalRow[]>`
+  const [totalUsers, signedInUsers, anonymousUsers, totalTasks, eventTotalsRaw] = await Promise.all([
+    prisma.user.count(),
+    prisma.user.count({ where: { email: { not: null } } }),
+    prisma.user.count({ where: { email: null } }),
+    prisma.task.count({ where: { deletedAt: null } }),
+    prisma.$queryRaw<EventTotalRow[]>`
         SELECT event, COUNT(*) AS count
         FROM "AnalyticsEvent"
         WHERE "createdAt" >= ${since.toISOString()}
         GROUP BY event
         ORDER BY count DESC
       `,
-    ]);
+  ]);
 
   // Daily active users from any tracked event in the last 30 days.
   const dauRaw = await prisma.$queryRaw<DayCountRow[]>`
@@ -97,12 +98,8 @@ export default handler(async ({ user }) => {
     ORDER BY bucket
   `;
 
-  const voiceCallsTotal = toNumber(
-    eventTotalsRaw.find((r) => r.event === "voice_used")?.count,
-  );
-  const voiceFailedTotal = toNumber(
-    eventTotalsRaw.find((r) => r.event === "voice_failed")?.count,
-  );
+  const voiceCallsTotal = toNumber(eventTotalsRaw.find((r) => r.event === "voice_used")?.count);
+  const voiceFailedTotal = toNumber(eventTotalsRaw.find((r) => r.event === "voice_failed")?.count);
 
   // p90 voice calls/day from the same per-user-max distribution.
   const voicePerUserMaxRaw = await prisma.$queryRaw<{ max_day: bigint | number }[]>`

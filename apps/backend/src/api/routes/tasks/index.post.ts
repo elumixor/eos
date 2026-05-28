@@ -36,7 +36,7 @@ export default handler(
         order: (maxOrder._max.order ?? -1) + 1,
       },
     });
-    trackEvent("task_created", user.id, { bucket: b, source: "type" });
+    await trackEvent("task_created", user.id, { bucket: b, source: "type" });
     return task;
   },
 );

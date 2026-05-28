@@ -37,9 +37,7 @@ export default handler(
         hue,
         hidden: hidden ?? false,
         capitalization: capitalization ?? "sentence",
-        parents: parentIds?.length
-          ? { create: parentIds.map((parentId) => ({ parentId })) }
-          : undefined,
+        parents: parentIds?.length ? { create: parentIds.map((parentId) => ({ parentId })) } : undefined,
       },
       include: { parents: { select: { parentId: true } } },
     });
