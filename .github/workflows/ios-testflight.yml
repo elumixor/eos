@@ -67,14 +67,11 @@ jobs:
           p12-file-base64: ${{ secrets.IOS_DIST_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
 
-      - name: Download provisioning profile
-        uses: apple-actions/download-provisioning-profiles@v3
-        with:
-          bundle-id: app.puretype
-          profile-type: IOS_APP_STORE
-          issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
-          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+      # No explicit profile download — fastlane's `sigh` (called inside the
+      # `beta` lane) creates/regenerates the App Store distribution profile
+      # via the ASC API every run. Pre-downloading via the GH action only
+      # works for profiles manually registered in Apple Developer Portal,
+      # which Xcode-managed automatic profiles aren't.
 
       - name: Fastlane beta
         working-directory: apps/frontend/ios
