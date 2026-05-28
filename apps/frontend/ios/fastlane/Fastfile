@@ -1,8 +1,8 @@
 default_platform(:ios)
 
 PROJECT = "App/App.xcodeproj"
-SCHEME = "Eos"
-APP_IDENTIFIER = "com.atma.eos.app"
+SCHEME = "PureType"
+APP_IDENTIFIER = "app.puretype"
 
 platform :ios do
   desc "Build and upload a new TestFlight build"
