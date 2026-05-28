@@ -179,3 +179,10 @@ resource "vercel_project_environment_variable" "frontend_vite_apple_redirect_url
   value      = var.vite_apple_redirect_url
   target     = ["production", "preview"]
 }
+
+resource "vercel_project_environment_variable" "frontend_vite_api_url" {
+  project_id = vercel_project.frontend.id
+  key        = "VITE_API_URL"
+  value      = var.vite_api_url
+  target     = ["production", "preview"]
+}

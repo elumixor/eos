@@ -104,3 +104,9 @@ variable "vite_apple_redirect_url" {
   type        = string
   default     = "https://puretype.app/auth/apple/callback"
 }
+
+variable "vite_api_url" {
+  description = "Backend API URL baked into the frontend Vite bundle at build time."
+  type        = string
+  default     = "https://api.puretype.app"
+}

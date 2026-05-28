@@ -10,13 +10,25 @@ function getLocalIP() {
   return "localhost";
 }
 
-const localIP = getLocalIP();
 const apiPort = 10000;
 
-export default defineConfig({
+function resolveApiUrl(mode: string) {
+  if (process.env.VITE_API_URL) return process.env.VITE_API_URL;
+  // Local dev: fall back to LAN IP so phones on the same network can reach the
+  // backend. Any other mode (build, preview, prod) must declare VITE_API_URL —
+  // otherwise the bundle ships with whatever LAN IP the build host happened to have.
+  if (mode === "development") return `http://${getLocalIP()}:${apiPort}`;
+  throw new Error(
+    `VITE_API_URL is required for mode="${mode}". ` +
+      `Set it as a project env var (Vercel) or pass inline ` +
+      `(VITE_API_URL=https://api.example.com bun run build).`,
+  );
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [tailwindcss(), sveltekit()],
   server: { port: 3000 },
   define: {
-    "import.meta.env.VITE_API_URL": JSON.stringify(process.env.VITE_API_URL ?? `http://${localIP}:${apiPort}`),
+    "import.meta.env.VITE_API_URL": JSON.stringify(resolveApiUrl(mode)),
   },
-});
+}));
