@@ -32,6 +32,12 @@
   // resets when the user dismisses the response panel.
   let voiceHistory = $state<{ transcript: string; message: string }[]>([]);
   const VOICE_HISTORY_MAX = 10;
+  // Inverse actions for the LAST voice turn. Reset every turn (single-level
+  // undo by design — see notes in dev memory). Each entry is a closure that
+  // reverses one mutation when called.
+  type Inverse = () => Promise<void>;
+  let voiceTurnInverses: Inverse[] = [];
+  let canUndoVoice = $state(false);
   let addInput: RichTaskInput | undefined = $state();
   let pickerOpen = $state(false);
 
@@ -107,6 +113,16 @@
   }
 
   function onGlobalKeydown(e: KeyboardEvent) {
+    // Cmd/Ctrl+Z — undo the last voice turn. Only fires when we have inverses
+    // and the focus isn't inside an editable field (so native undo still works
+    // while typing).
+    if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      if (!canUndoVoice) return;
+      if (isEditableTarget(e.target)) return;
+      e.preventDefault();
+      void undoVoice();
+      return;
+    }
     if (e.key !== "k" && e.key !== "K") return;
     if (!(e.metaKey || e.ctrlKey)) return;
     if (e.altKey || e.shiftKey) return;
@@ -276,10 +292,22 @@
       if (voiceHistory.length > 0) formData.append("history", JSON.stringify(voiceHistory));
       const stream = api.voice.transcribe.$post(formData);
       let streamedTranscript = "";
+      const newInverses: Inverse[] = [];
+      voiceTurnInverses = [];
+      canUndoVoice = false;
       for await (const ev of stream) {
         if (ev.type === "message") voiceMessage = (voiceMessage ?? "") + ev.text;
         else if (ev.type === "transcript") streamedTranscript = ev.text;
-        else if (ev.type === "action") void tasksStore.applyRemote(ev.task as Task);
+        else if (ev.type === "action") {
+          const task = ev.task as Task & { deletedAt?: string | null };
+          // Snapshot pre-state BEFORE the remote apply, so the inverse can
+          // restore exactly what was there. byId returns the current local
+          // copy (or undefined for a brand-new task).
+          const prior = tasksStore.byId(task.id);
+          const wasDeleted = Boolean(task.deletedAt);
+          await tasksStore.applyRemote(task);
+          newInverses.push(buildInverse(task, prior, wasDeleted));
+        }
       }
       const result = await stream.done;
       // Final reconciliation: prefer the complete server message in case any
@@ -294,6 +322,9 @@
       }
       // Belt-and-braces in case an action event was missed mid-stream.
       void sync.runNow();
+      // Inverses are applied newest-first, so reverse the recording order.
+      voiceTurnInverses = newInverses.reverse();
+      canUndoVoice = voiceTurnInverses.length > 0;
     } catch {
       voiceMessage = "Something went wrong processing that. Please try again.";
     } finally {
@@ -304,6 +335,48 @@
   function dismissVoice() {
     voiceMessage = null;
     voiceHistory = [];
+    voiceTurnInverses = [];
+    canUndoVoice = false;
+  }
+
+  function buildInverse(
+    after: Task & { deletedAt?: string | null },
+    prior: Task | undefined,
+    wasDeleted: boolean,
+  ): Inverse {
+    // delete: prior was alive, now tombstoned → restore it.
+    if (wasDeleted && prior) {
+      const snapshot = prior;
+      return () => tasksStore.restore(snapshot);
+    }
+    // create: no prior local copy → delete the new task.
+    if (!prior) {
+      return () => tasksStore.remove(after.id);
+    }
+    // update of any kind: write the prior fields back. Only keys that could
+    // have changed via voice need to be patched.
+    const patch: Partial<Task> = {
+      text: prior.text,
+      completed: prior.completed,
+      bucket: prior.bucket,
+    };
+    return async () => {
+      await tasksStore.update(after.id, patch);
+    };
+  }
+
+  async function undoVoice() {
+    if (!voiceTurnInverses.length) return;
+    const inverses = voiceTurnInverses;
+    voiceTurnInverses = [];
+    canUndoVoice = false;
+    for (const inv of inverses) {
+      try {
+        await inv();
+      } catch {
+        // best-effort — keep applying the rest
+      }
+    }
   }
 
   function handleVoiceError(message: string) {
@@ -393,14 +466,27 @@
               {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-white animate-pulse"></span>{/if}
             </p>
             {#if !voiceLoading && voiceMessage}
-              <button
-                onclick={dismissVoice}
-                aria-label="Dismiss"
-                class="shrink-0 p-1 -mt-0.5 rounded-lg text-white/70 hover:text-white
-                  hover:bg-white/10 transition-colors"
-              >
-                <X size={14} />
-              </button>
+              <div class="shrink-0 -mt-0.5 flex items-center gap-1">
+                {#if canUndoVoice}
+                  <button
+                    onclick={undoVoice}
+                    aria-label="Undo last voice turn"
+                    title="Undo (⌘Z)"
+                    class="px-2 py-0.5 rounded-lg text-[11px] font-medium text-white/90
+                      hover:text-white hover:bg-white/15 transition-colors"
+                  >
+                    Undo
+                  </button>
+                {/if}
+                <button
+                  onclick={dismissVoice}
+                  aria-label="Dismiss"
+                  class="p-1 rounded-lg text-white/70 hover:text-white
+                    hover:bg-white/10 transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
             {/if}
           </div>
         {/if}

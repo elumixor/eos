@@ -141,6 +141,17 @@ class TasksStore {
     return updated;
   }
 
+  // Restore a previously soft-deleted task. Used by the voice undo flow when
+  // the last turn included a `delete` action. The original row id is reused.
+  async restore(task: Task) {
+    this.list = this.list.some((t) => t.id === task.id)
+      ? this.list.map((t) => (t.id === task.id ? task : t))
+      : [...this.list, task];
+    await put("tasks", task);
+    await enqueue({ kind: "task.restore", id: task.id });
+    sync.schedule(0);
+  }
+
   async remove(id: string) {
     const cur = this.byId(id);
     if (!cur) return;

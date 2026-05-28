@@ -20,6 +20,7 @@ export type Op =
         startTime: string | null; duration: number | null;
       }> }
   | { kind: "task.delete"; id: string; clientUpdatedAt: string }
+  | { kind: "task.restore"; id: string }
   | { kind: "task.reorder"; items: { id: string; order: number; bucket: Bucket }[] }
   | { kind: "project.create"; id: string; name: string;
       avatarType?: "auto" | "emoji" | "image"; emoji?: string | null;

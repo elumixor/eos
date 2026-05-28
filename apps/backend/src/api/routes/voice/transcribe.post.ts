@@ -2,6 +2,7 @@ import { createGateway } from "@ai-sdk/gateway";
 import { parsePartialJson, stepCountIs, streamText } from "ai";
 import { env } from "env";
 import { readFormData } from "h3";
+import { trackEvent } from "services/analytics";
 import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
@@ -15,6 +16,7 @@ const actionSchema = z.object({
   op: z.enum(["create", "complete", "uncomplete", "edit", "delete"]),
   id: z.string().optional(),
   text: z.string().optional(),
+  bucket: z.enum(["today", "week", "later"]).optional(),
 });
 type Action = z.infer<typeof actionSchema>;
 
@@ -29,7 +31,7 @@ const recordSchema = z.object({
   actions: z
     .array(actionSchema)
     .describe(
-      "Operations to apply. create needs text; complete/uncomplete/delete need id; edit needs id + text.",
+      "Operations to apply. create: needs text. complete/uncomplete/delete: need id. edit: needs id and (text and/or bucket).",
     ),
 });
 
@@ -45,12 +47,29 @@ function mediaTypeFor(file: File): string {
 
 const historySchema = z.array(z.object({ transcript: z.string(), message: z.string() }));
 
+// Read-only SQL guard. query() wraps user-supplied SQL in a CTE that shadows
+// the `Task` name with a userId-scoped, alive-only view, so any reference to
+// Task inside the query is automatically tenant-isolated. Writes / pragmas
+// are rejected outright so the CTE shadow can't be bypassed.
+const FORBIDDEN_SQL = /\b(insert|update|delete|drop|alter|attach|detach|pragma|create|replace|truncate)\b/i;
+function isReadOnlySql(sql: string) {
+  const trimmed = sql.trim().replace(/;+\s*$/, "");
+  if (!trimmed) return false;
+  if (trimmed.includes(";")) return false;
+  if (FORBIDDEN_SQL.test(trimmed)) return false;
+  return /^\s*(select|with)\b/i.test(trimmed);
+}
+
 export default handler(async function* ({ user, event }) {
   requireAuth(user);
   const userId = user.id;
+  const startedAt = Date.now();
   const formData = await readFormData(event);
   const audioFile = formData.get("audio") as File;
-  if (!audioFile) throw new Error("No audio file provided");
+  if (!audioFile) {
+    trackEvent("voice_failed", userId, { reason: "no_audio" });
+    throw new Error("No audio file provided");
+  }
 
   const bytes = new Uint8Array(await audioFile.arrayBuffer());
   const mediaType = mediaTypeFor(audioFile);
@@ -93,27 +112,72 @@ export default handler(async function* ({ user, event }) {
     }
     if (!a.id) return null;
     if (a.op === "complete")
-      return prisma.task.update({ where: { id: a.id }, data: { completed: true } });
+      return prisma.task.update({
+        where: { id: a.id },
+        data: { completed: true, completedAt: new Date() },
+      });
     if (a.op === "uncomplete")
-      return prisma.task.update({ where: { id: a.id }, data: { completed: false } });
+      return prisma.task.update({
+        where: { id: a.id },
+        data: { completed: false, completedAt: null },
+      });
     if (a.op === "edit") {
+      const data: { text?: string; bucket?: string; scheduledAt?: Date | null } = {};
       const text = a.text?.trim();
-      if (!text) return null;
-      return prisma.task.update({ where: { id: a.id }, data: { text } });
+      if (text) data.text = text;
+      if (a.bucket) {
+        data.bucket = a.bucket;
+        // Bucket change re-stamps scheduledAt: today/week get "now" so the
+        // task isn't immediately treated as overdue; later clears it.
+        data.scheduledAt = a.bucket === "later" ? null : new Date();
+      }
+      if (!Object.keys(data).length) return null;
+      return prisma.task.update({ where: { id: a.id }, data });
     }
     if (a.op === "delete")
       return prisma.task.update({ where: { id: a.id }, data: { deletedAt: new Date() } });
     return null;
   }
 
+  const today = new Date().toISOString().slice(0, 10);
   const systemPrompt = `You are the assistant for PureType, a daily to-do app.
-Listen to the attached audio. If you need to know what tasks already exist
-(e.g. to complete or edit one), call the "findTasks" tool first. When ready,
-call the "record" tool exactly once with:
-  - reply: short one-sentence reply in the user's language, never empty
-  - transcript: exact transcription of what the user said
-  - actions: list of operations. create needs text; complete/uncomplete/
-    delete need id; edit needs id + new text. New tasks default to today.`;
+
+Today is ${today} (UTC).
+
+You have two tools:
+
+1) query({ sql }) — read-only SELECT against the user's data. The Task table
+   is automatically scoped to the current user and excludes deleted rows.
+   Schema:
+     Task(
+       id          TEXT,
+       text        TEXT,
+       completed   INTEGER  -- 0 | 1
+       completedAt DATETIME,
+       bucket      TEXT     -- 'today' | 'week' | 'later'
+       "order"     INTEGER,
+       scheduledAt DATETIME,
+       projectId   TEXT,
+       startTime   DATETIME,
+       duration    INTEGER  -- minutes
+       createdAt   DATETIME,
+       updatedAt   DATETIME
+     )
+   Use DATE(col) for day comparisons. Cap broad scans with LIMIT 30.
+   Quote "order" because it's a reserved word.
+
+2) record({ reply, transcript, actions }) — terminal call, exactly once.
+     reply       — one short sentence in the user's language. Never empty.
+     transcript  — exact transcription.
+     actions     — list of mutations to apply:
+       { op: 'create',     text }
+       { op: 'complete',   id }
+       { op: 'uncomplete', id }
+       { op: 'edit',       id, text?, bucket? }   // bucket moves between lists
+       { op: 'delete',     id }
+     New tasks default to today's list. A single utterance can map to many actions.
+
+Listen to the audio, call query() if you need ids or counts, then call record().`;
 
   const priorMessages = history.flatMap((h) => [
     { role: "user" as const, content: h.transcript },
@@ -134,31 +198,34 @@ call the "record" tool exactly once with:
       },
     ],
     tools: {
-      findTasks: {
+      query: {
         description:
-          "Search the user's tasks by substring and/or bucket. Returns up to 30 matches.",
+          "Run a read-only SQL SELECT against the user's data. The Task table is auto-scoped to the current user and excludes deleted rows. Use DATE() for day comparisons.",
         inputSchema: z.object({
-          query: z
+          sql: z
             .string()
-            .optional()
-            .describe("Case-insensitive substring to match against task text."),
-          bucket: z.enum(["today", "week", "later"]).optional(),
-          completed: z.boolean().optional(),
+            .describe(
+              "A single SELECT (or WITH … SELECT) statement. No semicolons, no writes, no PRAGMA.",
+            ),
         }),
-        execute: async ({ query, bucket, completed }) => {
-          const found = await prisma.task.findMany({
-            where: {
-              userId: userId,
-              deletedAt: null,
-              ...(bucket ? { bucket } : {}),
-              ...(completed !== undefined ? { completed } : {}),
-              ...(query ? { text: { contains: query } } : {}),
-            },
-            select: { id: true, text: true, bucket: true, completed: true },
-            orderBy: [{ bucket: "asc" }, { order: "asc" }],
-            take: 30,
-          });
-          return found;
+        execute: async ({ sql }) => {
+          if (!isReadOnlySql(sql)) {
+            return {
+              error:
+                "Rejected: only a single SELECT or WITH…SELECT is allowed. No semicolons or write keywords.",
+            };
+          }
+          try {
+            // CTE shadow: the inner SELECT becomes the table named "Task"
+            // for the duration of the user's query, so any FROM "Task" /
+            // JOIN "Task" reference is automatically tenant-scoped.
+            const escapedUserId = userId.replace(/'/g, "''");
+            const scoped = `WITH "Task" AS (SELECT * FROM "Task" WHERE "userId" = '${escapedUserId}' AND "deletedAt" IS NULL) ${sql.trim().replace(/;+\s*$/, "")} LIMIT 100`;
+            const rows = await prisma.$queryRawUnsafe<unknown[]>(scoped);
+            return { rows };
+          } catch (err) {
+            return { error: (err as Error).message };
+          }
         },
       },
       record: {
@@ -167,7 +234,7 @@ call the "record" tool exactly once with:
       },
     },
     toolChoice: "auto",
-    // Allow a couple of findTasks calls before the final record.
+    // Allow a couple of query() calls before record() closes the loop.
     stopWhen: stepCountIs(4),
   });
 
@@ -245,6 +312,13 @@ call the "record" tool exactly once with:
     await flushReady(toolInput as unknown as Record<string, unknown>, true);
     while (yieldQueue.length) yield yieldQueue.shift()!;
   }
+
+  trackEvent("voice_used", userId, {
+    durationMs: Date.now() - startedAt,
+    audioBytes: bytes.byteLength,
+    actionsApplied,
+    hadTranscript: Boolean(toolInput?.transcript),
+  });
 
   return {
     transcription: toolInput?.transcript ?? "",

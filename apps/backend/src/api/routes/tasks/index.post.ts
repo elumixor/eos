@@ -1,3 +1,4 @@
+import { trackEvent } from "services/analytics";
 import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
@@ -23,7 +24,7 @@ export default handler(
       _max: { order: true },
     });
 
-    return prisma.task.create({
+    const task = await prisma.task.create({
       data: {
         userId: user.id,
         text,
@@ -35,5 +36,7 @@ export default handler(
         order: (maxOrder._max.order ?? -1) + 1,
       },
     });
+    trackEvent("task_created", user.id, { bucket: b, source: "type" });
+    return task;
   },
 );

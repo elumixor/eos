@@ -1,5 +1,6 @@
 import { env } from "env";
 import { createError } from "h3";
+import { trackEvent } from "services/analytics";
 import { createJWT } from "services/auth";
 import { mergeAnonymousUser } from "services/merge-anonymous";
 import { prisma } from "services/prisma";
@@ -21,6 +22,7 @@ export default handler(
     const anonymousId = caller && !caller.email ? caller.id : null;
 
     let user = await prisma.user.findUnique({ where: { email: data.email } });
+    const wasNew = !user;
 
     if (!user) {
       if (anonymousId) {
@@ -34,6 +36,11 @@ export default handler(
     } else if (anonymousId && anonymousId !== user.id) {
       await mergeAnonymousUser(anonymousId, user.id);
     }
+
+    trackEvent(wasNew ? "signup" : "signin", user.id, {
+      provider: "google",
+      mergedAnonymous: Boolean(anonymousId),
+    });
 
     return { token: createJWT(user), anonymousId };
   },

@@ -7,7 +7,23 @@ model User {
   name      String?
   projects  Project[]
   tasks     Task[]
+  events    AnalyticsEvent[]
   createdAt DateTime @default(now())
+}
+
+// Stage-1 analytics: fire-and-forget events for DAU, funnel, AI cost.
+// Schema is intentionally generic — `event` is the verb, `props` is a JSON
+// blob for anything route-specific (e.g. provider, durationMs, cost).
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event     String
+  props     String?  // JSON-encoded
+  createdAt DateTime @default(now())
+
+  @@index([event, createdAt])
+  @@index([userId, createdAt])
 }
 
 model Project {

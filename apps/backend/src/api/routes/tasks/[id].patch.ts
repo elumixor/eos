@@ -1,4 +1,5 @@
 import { createError } from "h3";
+import { trackEvent } from "services/analytics";
 import { requireAuth } from "services/auth";
 import { prisma } from "services/prisma";
 import { handler } from "utils";
@@ -32,6 +33,7 @@ export default handler(
       },
     });
     if (result.count === 0) throw createError({ statusCode: 404, statusMessage: "Task not found" });
+    if (body.completed === true) trackEvent("task_completed", user.id);
     return prisma.task.findUniqueOrThrow({ where: { id: router.id } });
   },
 );

@@ -49,6 +49,10 @@ const TaskDelete = z.object({
   id: z.string().min(1),
   clientUpdatedAt: z.string(),
 });
+const TaskRestore = z.object({
+  kind: z.literal("task.restore"),
+  id: z.string().min(1),
+});
 const TaskReorder = z.object({
   kind: z.literal("task.reorder"),
   items: z.array(
@@ -94,6 +98,7 @@ const Op = z.union([
   TaskCreate,
   TaskUpdate,
   TaskDelete,
+  TaskRestore,
   TaskReorder,
   ProjectCreate,
   ProjectUpdate,
@@ -156,6 +161,13 @@ async function applyOp(userId: string, op: OpInput): Promise<OpResult> {
         if (!cur) return { ok: false, reason: "not_found" };
         if (cur.deletedAt) return { ok: true };
         await prisma.task.update({ where: { id: op.id }, data: { deletedAt: new Date() } });
+        return { ok: true };
+      }
+      case "task.restore": {
+        const cur = await prisma.task.findFirst({ where: { id: op.id, userId } });
+        if (!cur) return { ok: false, reason: "not_found" };
+        if (!cur.deletedAt) return { ok: true };
+        await prisma.task.update({ where: { id: op.id }, data: { deletedAt: null } });
         return { ok: true };
       }
       case "task.reorder": {
