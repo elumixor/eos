@@ -1,7 +1,7 @@
 {
-  "name": "Eos",
-  "short_name": "Eos",
-  "description": "Daily task checklist",
+  "name": "PureType",
+  "short_name": "PureType",
+  "description": "Minimal todos. Just type.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#141418",

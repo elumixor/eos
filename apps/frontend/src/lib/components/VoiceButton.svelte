@@ -60,7 +60,7 @@
       starting = false;
       notifyWarning();
       onError(
-        "Microphone access is blocked. Enable it for Eos in your device settings, then try again.",
+        "Microphone access is blocked. Enable it for PureType in your device settings, then try again.",
       );
       return;
     }

@@ -75,7 +75,7 @@ export default handler(async function* ({ user, event }) {
     })
     .join("\n\n");
 
-  const systemPrompt = `You are the assistant for Eos, a daily to-do app.
+  const systemPrompt = `You are the assistant for PureType, a daily to-do app.
 The user spoke a command. Listen to the attached audio, decide what changes
 to make to their task lists, and respond with a JSON object:
 
