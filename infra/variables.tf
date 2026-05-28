@@ -110,3 +110,9 @@ variable "vite_api_url" {
   type        = string
   default     = "https://api.puretype.app"
 }
+
+variable "admin_emails" {
+  description = "Comma-separated list of emails allowed to access /admin/*. Empty = nobody."
+  type        = string
+  default     = ""
+}

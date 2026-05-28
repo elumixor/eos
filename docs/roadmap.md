@@ -31,7 +31,8 @@ Type-or-voice → parsed task. Archive on swipe. Offline-first sync.
 | Account deletion + ToS disclaimer | ✅ |
 | `AnalyticsEvent` table + `trackEvent()` helper | ✅ |
 | Sentry / error tracking | ⏳ deferred until first triage need |
-| Internal `/admin` dashboard (DAU, funnel, AI cost) | ⏳ next |
+| Internal `/admin` dashboard (DAU, funnel, AI cost, voice histogram) | ✅ |
+| `docs/pricing.md` (tiers, decision criteria, trial tactic) | ✅ |
 | App Store screenshots + v2.0.0 listing copy | ⏳ next |
 | Sign in with Apple confirmed end-to-end | ✅ |
 | Manual QA on clean device (anonymous → sign-in flow) | ⏳ next |

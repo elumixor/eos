@@ -15,6 +15,9 @@ const envSchema = z
     GOOGLE_IOS_CLIENT_ID: z.string().min(1).optional(),
     APPLE_CLIENT_ID: z.string().min(1),
     APPLE_WEB_CLIENT_ID: z.string().min(1).optional(),
+
+    // Comma-separated email allowlist for /admin/*. Anyone else gets 403.
+    ADMIN_EMAILS: z.string().default(""),
   })
   .transform((e) => ({
     ...e,

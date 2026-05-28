@@ -60,6 +60,24 @@ function isReadOnlySql(sql: string) {
   return /^\s*(select|with)\b/i.test(trimmed);
 }
 
+// SQLite returns COUNT()/SUM() as BigInt and DATETIME columns as Date —
+// neither survives JSON.stringify, so we'd silently break the tool result
+// shipped back to the model. Recursively normalise.
+function normaliseValue(v: unknown): unknown {
+  if (typeof v === "bigint") return Number(v);
+  if (v instanceof Date) return v.toISOString();
+  if (Array.isArray(v)) return v.map(normaliseValue);
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v)) out[k] = normaliseValue(val);
+    return out;
+  }
+  return v;
+}
+function normaliseRows(rows: unknown[]): unknown[] {
+  return rows.map(normaliseValue);
+}
+
 export default handler(async function* ({ user, event }) {
   requireAuth(user);
   const userId = user.id;
@@ -177,7 +195,9 @@ You have two tools:
        { op: 'delete',     id }
      New tasks default to today's list. A single utterance can map to many actions.
 
-Listen to the audio, call query() if you need ids or counts, then call record().`;
+Listen to the audio, call query() if you need ids or counts, then ALWAYS call
+record() to finish — even for purely informational questions (use the answer
+as the reply and leave actions empty).`;
 
   const priorMessages = history.flatMap((h) => [
     { role: "user" as const, content: h.transcript },
@@ -210,21 +230,39 @@ Listen to the audio, call query() if you need ids or counts, then call record().
         }),
         execute: async ({ sql }) => {
           if (!isReadOnlySql(sql)) {
+            console.warn("[voice.query] rejected non-readonly sql", { userId, sql });
             return {
               error:
                 "Rejected: only a single SELECT or WITH…SELECT is allowed. No semicolons or write keywords.",
+              rejectedSql: sql,
             };
           }
+          const escapedUserId = userId.replace(/'/g, "''");
+          const scoped = `WITH "Task" AS (SELECT * FROM "Task" WHERE "userId" = '${escapedUserId}' AND "deletedAt" IS NULL) ${sql.trim().replace(/;+\s*$/, "")} LIMIT 100`;
+          const t0 = Date.now();
           try {
-            // CTE shadow: the inner SELECT becomes the table named "Task"
-            // for the duration of the user's query, so any FROM "Task" /
-            // JOIN "Task" reference is automatically tenant-scoped.
-            const escapedUserId = userId.replace(/'/g, "''");
-            const scoped = `WITH "Task" AS (SELECT * FROM "Task" WHERE "userId" = '${escapedUserId}' AND "deletedAt" IS NULL) ${sql.trim().replace(/;+\s*$/, "")} LIMIT 100`;
             const rows = await prisma.$queryRawUnsafe<unknown[]>(scoped);
-            return { rows };
+            const normalised = normaliseRows(rows);
+            console.info("[voice.query] ok", {
+              userId,
+              ms: Date.now() - t0,
+              rowCount: normalised.length,
+              sql,
+            });
+            return { rows: normalised, rowCount: normalised.length };
           } catch (err) {
-            return { error: (err as Error).message };
+            const message = err instanceof Error ? err.message : String(err);
+            console.error("[voice.query] failed", {
+              userId,
+              ms: Date.now() - t0,
+              sql,
+              scoped,
+              error: message,
+              stack: err instanceof Error ? err.stack : undefined,
+            });
+            // Return the actual error to the model so it can adjust its
+            // query (e.g. fix a typo'd column) instead of giving up.
+            return { error: message, attemptedSql: sql };
           }
         },
       },
@@ -233,9 +271,13 @@ Listen to the audio, call query() if you need ids or counts, then call record().
         inputSchema: recordSchema,
       },
     },
-    toolChoice: "auto",
-    // Allow a couple of query() calls before record() closes the loop.
-    stopWhen: stepCountIs(4),
+    // "required" forces a tool call on every step — otherwise Gemini will
+    // happily answer informational questions ("how many tasks?") with free
+    // text and skip record() entirely, leaving us with an empty response.
+    toolChoice: "required",
+    // Generous step budget so a couple of query() calls can still be
+    // followed by the terminal record().
+    stopWhen: stepCountIs(6),
   });
 
   let activeToolName: string | null = null;
@@ -270,10 +312,33 @@ Listen to the audio, call query() if you need ids or counts, then call record().
       while (actionsApplied < ready) {
         const candidate = arr[actionsApplied++];
         const validated = actionSchema.safeParse(candidate);
-        if (!validated.success) continue;
-        const result = await applyAction(validated.data);
-        if (!result) continue;
-        yieldQueue.push({ type: "action" as const, task: result });
+        if (!validated.success) {
+          console.warn("[voice.action] skipped invalid action", {
+            userId,
+            index: actionsApplied - 1,
+            candidate,
+            issues: validated.error.issues,
+          });
+          continue;
+        }
+        try {
+          const result = await applyAction(validated.data);
+          if (!result) {
+            console.warn("[voice.action] no-op (missing required field)", {
+              userId,
+              action: validated.data,
+            });
+            continue;
+          }
+          yieldQueue.push({ type: "action" as const, task: result });
+        } catch (err) {
+          console.error("[voice.action] apply failed", {
+            userId,
+            action: validated.data,
+            error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          });
+        }
       }
     }
   }
@@ -286,8 +351,19 @@ Listen to the audio, call query() if you need ids or counts, then call record().
     | { type: "action"; task: unknown }
   )[] = [];
 
+  // Safety net: if the model ignores toolChoice="required" and emits plain
+  // text (rare, but it has happened), surface it as the message rather than
+  // returning an empty reply.
+  let fallbackText = "";
+
   for await (const part of stream.fullStream) {
-    if (part.type === "tool-input-start") {
+    if (part.type === "text-delta") {
+      fallbackText += part.text;
+      // Only stream the fallback if record() hasn't claimed the reply slot.
+      if (replyEmitted === "") {
+        yieldQueue.push({ type: "message" as const, text: part.text });
+      }
+    } else if (part.type === "tool-input-start") {
       activeToolName = part.toolName;
       inputBuffer = "";
     } else if (part.type === "tool-input-end") {
@@ -302,7 +378,20 @@ Listen to the audio, call query() if you need ids or counts, then call record().
       }
     } else if (part.type === "tool-call" && part.toolName === "record") {
       const parsed = recordSchema.safeParse(part.input);
-      if (parsed.success) toolInput = parsed.data;
+      if (parsed.success) {
+        toolInput = parsed.data;
+      } else {
+        console.warn("[voice.record] tool-call input failed schema", {
+          userId,
+          input: part.input,
+          issues: parsed.error.issues,
+        });
+      }
+    } else if (part.type === "error") {
+      console.error("[voice.stream] error part from model", {
+        userId,
+        error: part.error,
+      });
     }
     while (yieldQueue.length) yield yieldQueue.shift()!;
   }
@@ -313,15 +402,47 @@ Listen to the audio, call query() if you need ids or counts, then call record().
     while (yieldQueue.length) yield yieldQueue.shift()!;
   }
 
+  const durationMs = Date.now() - startedAt;
+  const finalMessage = (toolInput?.reply ?? replyEmitted ?? fallbackText).trim();
+  const finalTranscript = toolInput?.transcript ?? "";
+
+  console.info("[voice] turn done", {
+    userId,
+    durationMs,
+    audioBytes: bytes.byteLength,
+    mediaType,
+    historyTurns: history.length,
+    recordCalled: Boolean(toolInput),
+    actionsApplied,
+    messageSource: toolInput?.reply
+      ? "tool-input"
+      : replyEmitted
+        ? "stream-buffer"
+        : fallbackText
+          ? "text-delta-fallback"
+          : "empty",
+    messageLen: finalMessage.length,
+    transcriptLen: finalTranscript.length,
+  });
+  if (!finalMessage) {
+    console.warn("[voice] empty message returned", {
+      userId,
+      toolInputSeen: Boolean(toolInput),
+      replyEmittedLen: replyEmitted.length,
+      fallbackLen: fallbackText.length,
+    });
+  }
+
   trackEvent("voice_used", userId, {
-    durationMs: Date.now() - startedAt,
+    durationMs,
     audioBytes: bytes.byteLength,
     actionsApplied,
-    hadTranscript: Boolean(toolInput?.transcript),
+    hadTranscript: Boolean(finalTranscript),
+    recordCalled: Boolean(toolInput),
   });
 
   return {
-    transcription: toolInput?.transcript ?? "",
-    message: (toolInput?.reply ?? replyEmitted).trim(),
+    transcription: finalTranscript,
+    message: finalMessage,
   };
 });

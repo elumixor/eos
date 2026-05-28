@@ -220,3 +220,10 @@ resource "vercel_dns_record" "spf_improvmx" {
   value  = "v=spf1 include:spf.improvmx.com ~all"
   ttl    = 60
 }
+
+resource "vercel_project_environment_variable" "backend_admin_emails" {
+  project_id = vercel_project.backend.id
+  key        = "ADMIN_EMAILS"
+  value      = var.admin_emails
+  target     = ["production", "preview"]
+}

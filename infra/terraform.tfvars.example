@@ -16,3 +16,6 @@ apple_client_id    = "com.atmagaming.eos"
 # Optional:
 # google_ios_client_id = "...apps.googleusercontent.com"
 # apple_web_client_id  = "com.atmagaming.eos.web"
+
+# Comma-separated emails allowed to access /admin/*. Leave empty to disable.
+admin_emails = "you@example.com"
