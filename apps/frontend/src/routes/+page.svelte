@@ -227,14 +227,18 @@
 
   async function handleVoiceRecorded(file: File) {
     voiceLoading = true;
-    voiceMessage = null;
+    voiceMessage = "";
     try {
       const formData = new FormData();
       formData.append("audio", file);
-      const result = await api.voice.transcribe.$post(formData);
-      voiceMessage = result.message ?? null;
-      // The voice route mutated server-side state; sync will rehydrate the
-      // store on its next tick.
+      const stream = api.voice.transcribe.$post(formData);
+      for await (const ev of stream) {
+        if (ev.type === "message") voiceMessage = (voiceMessage ?? "") + ev.text;
+      }
+      const result = await stream.done;
+      // Final reconciliation: prefer the complete server message in case any
+      // streamed character was missed mid-flight.
+      if (result.message) voiceMessage = result.message;
     } catch {
       voiceMessage = "Something went wrong processing that. Please try again.";
     } finally {
@@ -288,25 +292,6 @@
     </a>
   </header>
 
-  {#if voiceMessage}
-    <div
-      class="flex items-start gap-3 mb-6 px-4 py-3 rounded-2xl bg-[var(--color-surface-2)]
-        border border-[var(--color-border)] animate-fade-up"
-    >
-      <p class="flex-1 text-[13px] font-light leading-relaxed text-[var(--color-ink-2)]">
-        {voiceMessage}
-      </p>
-      <button
-        onclick={() => (voiceMessage = null)}
-        aria-label="Dismiss"
-        class="shrink-0 p-1 rounded-lg text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
-          hover:bg-[var(--color-surface-3)] transition-colors"
-      >
-        <X size={14} />
-      </button>
-    </div>
-  {/if}
-
   <div class="space-y-5">
     {#each SECTION_ORDER as key (key)}
       {#if key !== "overdue" || buckets[key].length > 0}
@@ -338,7 +323,32 @@
       bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)]/95 to-transparent"
     style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));"
   >
-    <div class="flex gap-2 items-start">
+    {#if voiceMessage || voiceLoading}
+      <div
+        class="relative px-4 pt-3 pb-6 -mb-4 rounded-t-2xl bg-[var(--color-surface-2)]
+          border border-b-0 border-[var(--color-border)] animate-fade-up"
+      >
+        <div class="flex items-start gap-3">
+          <p
+            class="flex-1 min-h-[18px] text-[13px] font-light leading-relaxed text-[var(--color-ink-2)]
+              whitespace-pre-wrap"
+          >
+            {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-[var(--color-accent)] animate-pulse"></span>{/if}
+          </p>
+          {#if !voiceLoading && voiceMessage}
+            <button
+              onclick={() => (voiceMessage = null)}
+              aria-label="Dismiss"
+              class="shrink-0 p-1 -mt-0.5 rounded-lg text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
+                hover:bg-[var(--color-surface-3)] transition-colors"
+            >
+              <X size={14} />
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+    <div class="relative flex gap-2 items-start">
       <RichTaskInput
         bind:this={addInput}
         placeholder="What needs doing?  (@ for project, time, duration)"

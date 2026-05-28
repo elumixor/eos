@@ -7,6 +7,7 @@ const envSchema = z
     TURSO_AUTH_TOKEN: z.string().min(1),
     TELEGRAM_BOT_TOKEN: z.string().min(1),
     OPENAI_API_KEY: z.string().min(1),
+    VERCEL_AI_KEY: z.string().min(1),
 
     // Auth
     SESSION_SECRET: z.string().min(1),
