@@ -275,20 +275,24 @@
       formData.append("audio", file);
       if (voiceHistory.length > 0) formData.append("history", JSON.stringify(voiceHistory));
       const stream = api.voice.transcribe.$post(formData);
+      let streamedTranscript = "";
       for await (const ev of stream) {
         if (ev.type === "message") voiceMessage = (voiceMessage ?? "") + ev.text;
+        else if (ev.type === "transcript") streamedTranscript = ev.text;
+        else if (ev.type === "action") void tasksStore.applyRemote(ev.task as Task);
       }
       const result = await stream.done;
       // Final reconciliation: prefer the complete server message in case any
       // streamed character was missed mid-flight.
       if (result.message) voiceMessage = result.message;
-      if (result.transcription || result.message) {
+      const finalTranscript = result.transcription || streamedTranscript;
+      if (finalTranscript || result.message) {
         voiceHistory = [
           ...voiceHistory,
-          { transcript: result.transcription ?? "", message: result.message ?? "" },
+          { transcript: finalTranscript, message: result.message ?? "" },
         ].slice(-VOICE_HISTORY_MAX);
       }
-      // Server applied task ops directly; pull the deltas so the UI reflects them.
+      // Belt-and-braces in case an action event was missed mid-stream.
       void sync.runNow();
     } catch {
       voiceMessage = "Something went wrong processing that. Please try again.";

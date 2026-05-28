@@ -4,6 +4,8 @@ import { del, getAll, put, putMany } from "$lib/db/idb";
 import { enqueue } from "$lib/db/outbox";
 import { onPulled, sync } from "$lib/sync.svelte";
 
+type MaybeDeleted = Task & { deletedAt?: string | null };
+
 // Offline-first tasks store. Same pattern as projects: IDB hydrate on boot,
 // optimistic local writes, enqueued ops for sync. Bucket-based scheduling
 // (today | week | later), with scheduledAt stamped server-side when a task
@@ -49,6 +51,24 @@ class TasksStore {
 
   byId(id: string): Task | undefined {
     return this.list.find((t) => t.id === id);
+  }
+
+  // Apply a task record that the server already persisted (e.g. via the voice
+  // agent route). Bypasses the outbox — we'd just send the server its own
+  // write back. Treats deletedAt as a tombstone, same as `onPulled`.
+  async applyRemote(task: Task) {
+    const tombstoned = (task as MaybeDeleted).deletedAt;
+    if (tombstoned) {
+      this.list = this.list.filter((t) => t.id !== task.id);
+      await del("tasks", task.id);
+      return;
+    }
+    const cur = this.byId(task.id);
+    if (cur && cur.updatedAt > task.updatedAt) return;
+    this.list = cur
+      ? this.list.map((t) => (t.id === task.id ? task : t))
+      : [...this.list, task];
+    await put("tasks", task);
   }
 
   async create(input: {

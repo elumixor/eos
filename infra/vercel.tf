@@ -186,3 +186,37 @@ resource "vercel_project_environment_variable" "frontend_vite_api_url" {
   value      = var.vite_api_url
   target     = ["production", "preview"]
 }
+
+# ---------------------------------------------------------------------------
+# Email forwarding via ImprovMX
+# ---------------------------------------------------------------------------
+# support@puretype.app and other aliases configured in the ImprovMX dashboard
+# are forwarded to todoro.app.atma@gmail.com. MX records below route inbound
+# mail to ImprovMX's servers; the SPF TXT allows ImprovMX to relay on our
+# behalf so Gmail doesn't junk forwarded messages.
+
+resource "vercel_dns_record" "mx_improvmx_primary" {
+  domain = "puretype.app"
+  name   = ""
+  type   = "MX"
+  value  = "mx1.improvmx.com"
+  mx_priority = 10
+  ttl    = 60
+}
+
+resource "vercel_dns_record" "mx_improvmx_secondary" {
+  domain = "puretype.app"
+  name   = ""
+  type   = "MX"
+  value  = "mx2.improvmx.com"
+  mx_priority = 20
+  ttl    = 60
+}
+
+resource "vercel_dns_record" "spf_improvmx" {
+  domain = "puretype.app"
+  name   = ""
+  type   = "TXT"
+  value  = "v=spf1 include:spf.improvmx.com ~all"
+  ttl    = 60
+}

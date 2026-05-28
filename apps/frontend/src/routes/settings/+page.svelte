@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Capacitor } from "@capacitor/core";
   import { SocialLogin } from "@capgo/capacitor-social-login";
-  import { ArrowLeft, LogOut, Sun, Moon } from "lucide-svelte";
+  import { ArrowLeft, LogOut, Sun, Moon, Trash2 } from "lucide-svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { api } from "$lib/api/client";
@@ -116,6 +116,27 @@
     await auth.logout();
     location.assign("/");
   }
+
+  let deleting = $state(false);
+  async function handleDeleteAccount() {
+    const confirmed = window.confirm(
+      "Delete your account?\n\nThis permanently removes your tasks, projects, and account from our servers. This cannot be undone.",
+    );
+    if (!confirmed) return;
+    deleting = true;
+    error = null;
+    try {
+      await api.users.me.$delete();
+      await SocialLogin.logout({ provider: "google" }).catch(() => {});
+      await SocialLogin.logout({ provider: "apple" }).catch(() => {});
+      user.reset();
+      await auth.logout();
+      location.assign("/");
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Could not delete account";
+      deleting = false;
+    }
+  }
 </script>
 
 <main class="relative max-w-md mx-auto px-5 pt-10 pb-24 safe-top min-h-screen">
@@ -188,6 +209,12 @@
           <span class="text-sm font-medium">{signingIn ? "Signing in…" : "Continue with Apple"}</span>
         </button>
       </div>
+      <p class="text-[0.7rem] text-[var(--color-ink-3)] mt-4 leading-relaxed">
+        By continuing you agree to our
+        <a href="/terms" class="underline hover:text-[var(--color-ink-2)]">Terms</a>
+        and
+        <a href="/privacy" class="underline hover:text-[var(--color-ink-2)]">Privacy Policy</a>.
+      </p>
       {#if error}
         <p class="text-sm text-red-500 mt-4">{error}</p>
       {/if}
@@ -201,6 +228,28 @@
         <LogOut size={17} />
         <span class="text-sm font-medium">Sign out</span>
       </button>
+      {#if error}
+        <p class="text-sm text-red-500 mt-4">{error}</p>
+      {/if}
     {/if}
+  </section>
+
+  <section class="mt-10">
+    <div class="flex justify-center pt-4">
+      <button
+        type="button"
+        onclick={handleDeleteAccount}
+        disabled={deleting}
+        class="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-xs
+          text-[var(--color-ink-3)] hover:text-[var(--color-danger)]
+          disabled:opacity-60 transition-colors"
+      >
+        <Trash2 size={13} />
+        <span>{deleting ? "Deleting…" : "Delete account"}</span>
+      </button>
+    </div>
+    <p class="text-center text-[0.7rem] text-[var(--color-ink-3)] mt-2 leading-relaxed">
+      Permanently removes your tasks and account from our servers.
+    </p>
   </section>
 </main>
