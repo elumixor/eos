@@ -372,6 +372,14 @@
       >
         {#if voiceRecording}
           <VoiceVisualizer stream={voiceStream} />
+        {:else if voiceLoading && !voiceMessage}
+          <div class="flex items-center justify-center h-14">
+            <div class="flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-white animate-voice-bounce [animation-delay:-0.32s]"></span>
+              <span class="w-2 h-2 rounded-full bg-white animate-voice-bounce [animation-delay:-0.16s]"></span>
+              <span class="w-2 h-2 rounded-full bg-white animate-voice-bounce"></span>
+            </div>
+          </div>
         {:else}
           <div class="flex items-start gap-3">
             <p

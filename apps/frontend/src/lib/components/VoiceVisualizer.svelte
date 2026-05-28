@@ -15,18 +15,23 @@
     analyzer = new AudioMotionAnalyzer(container, {
       source,
       audioCtx,
-      height: 48,
+      // Critical: don't pipe the mic back to the speakers.
+      connectSpeakers: false,
+      height: 56,
       mode: 6,
-      barSpace: 0.4,
+      barSpace: 0.35,
+      roundBars: true,
       showScaleX: false,
       showScaleY: false,
       showPeaks: false,
       showBgColor: false,
       overlay: true,
       smoothing: 0.7,
-      gradient: "steelblue",
+      // Bars rise from a midline 70% down the canvas, reflected 30% below.
+      reflexRatio: 0.3,
+      reflexAlpha: 1,
+      reflexFit: true,
       lumiBars: false,
-      reflexRatio: 0,
       ledBars: false,
       radial: false,
       mirror: 0,
@@ -51,4 +56,4 @@
   });
 </script>
 
-<div bind:this={container} class="w-full h-12"></div>
+<div bind:this={container} class="w-full h-14"></div>
