@@ -249,7 +249,7 @@
   {@const visibleNoDrag = shown.filter((p) => p.id !== draggingId)}
   <div
     bind:this={barEl}
-    class="flex items-center gap-2 mb-6 overflow-x-auto no-scrollbar -mx-1 px-1"
+    class="flex items-center gap-2 overflow-x-auto no-scrollbar -mx-1 px-1"
     style="touch-action: pan-x; overscroll-behavior-x: contain;"
   >
     {#each visibleNoDrag as p, i (p.id)}

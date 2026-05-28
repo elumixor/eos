@@ -240,16 +240,19 @@
   bg-[radial-gradient(ellipse_at_center,var(--color-accent-glow)_0%,transparent_70%)] opacity-40"></div>
 
 <main class="relative max-w-md mx-auto px-5 pt-6 pb-36 safe-top min-h-screen">
-  <a
-    href="/settings"
-    aria-label="Settings"
-    class="fixed z-30 w-10 h-10 rounded-full bg-[var(--color-surface-2)]/90 backdrop-blur
-      ring-1 ring-[var(--color-border)] hover:bg-[var(--color-surface-3)]
-      flex items-center justify-center transition-colors shadow-sm"
-    style="top: calc(env(safe-area-inset-top, 0px) + 0.5rem); right: 0.75rem;"
-  >
-    <SettingsIcon size={16} class="text-[var(--color-ink-2)]" />
-  </a>
+  <header class="flex items-center gap-3 mb-6">
+    <div class="flex-1 min-w-0">
+      <FilterBar />
+    </div>
+    <a
+      href="/settings"
+      aria-label="Settings"
+      class="shrink-0 leading-none text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
+        transition-colors"
+    >
+      <SettingsIcon size={18} strokeWidth={1.75} />
+    </a>
+  </header>
 
   {#if voiceMessage}
     <div
@@ -270,7 +273,6 @@
     </div>
   {/if}
 
-  <FilterBar />
   <div class="space-y-5">
     {#each SECTION_ORDER as key (key)}
       <BucketSection

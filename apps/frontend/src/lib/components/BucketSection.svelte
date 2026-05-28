@@ -52,7 +52,19 @@
 <section class="animate-fade-up">
   <div
     data-dnd-list={listId}
-    class="flex items-center gap-2 mb-2 px-1 py-1 rounded-lg transition-colors
+    role="button"
+    tabindex="0"
+    aria-label={hidden ? `Show ${title}` : `Hide ${title}`}
+    aria-pressed={!hidden}
+    onclick={toggle}
+    onkeydown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    }}
+    class="flex items-center gap-2 mb-2 px-1 py-1 rounded-lg transition-colors cursor-pointer select-none
+      hover:bg-[var(--color-surface-2)]
       {isOver ? 'bg-[var(--color-accent-dim)]' : ''}"
   >
     <h2 class="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
@@ -88,20 +100,16 @@
       </span>
     {/if}
 
-    <button
-      type="button"
-      onclick={toggle}
-      aria-label={hidden ? `Show ${title}` : `Hide ${title}`}
-      class="ml-auto w-6 h-6 rounded-md flex items-center justify-center
-        text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
-        hover:bg-[var(--color-surface-2)] transition-colors"
+    <span
+      aria-hidden="true"
+      class="ml-auto w-6 h-6 rounded-md flex items-center justify-center text-[var(--color-ink-3)]"
     >
       {#if hidden}
         <EyeOff size={13} />
       {:else}
         <Eye size={13} />
       {/if}
-    </button>
+    </span>
   </div>
 
   {#if !hidden}
