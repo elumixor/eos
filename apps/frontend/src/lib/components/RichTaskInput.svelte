@@ -431,7 +431,7 @@
   }
 </script>
 
-<div class="relative flex-1">
+<div class="relative flex-1 min-w-0">
   <div
     bind:this={editor}
     role="textbox"
