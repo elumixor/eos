@@ -115,6 +115,7 @@ async function applyOp(userId: string, op: OpInput): Promise<OpResult> {
             userId,
             text: op.text,
             completed: op.completed ?? false,
+            completedAt: op.completed ? new Date() : null,
             order: op.order ?? 0,
             bucket: op.bucket ?? "later",
             scheduledAt: op.scheduledAt ? new Date(op.scheduledAt) : null,
@@ -131,11 +132,19 @@ async function applyOp(userId: string, op: OpInput): Promise<OpResult> {
         if (!cur) return { ok: false, reason: "not_found" };
         if (cur.updatedAt > new Date(op.clientUpdatedAt))
           return { ok: false, reason: "conflict" };
-        const { startTime, scheduledAt, ...rest } = op.patch;
+        const { startTime, scheduledAt, completed, ...rest } = op.patch;
+        // Derive completedAt server-side from the transition so it can't be
+        // forged by a client and stays monotonic across edits.
+        let completedAtPatch: { completedAt: Date | null } | object = {};
+        if (completed !== undefined && completed !== cur.completed) {
+          completedAtPatch = { completedAt: completed ? new Date() : null };
+        }
         await prisma.task.update({
           where: { id: op.id },
           data: {
             ...rest,
+            ...(completed !== undefined ? { completed } : {}),
+            ...completedAtPatch,
             ...(startTime !== undefined ? { startTime: startTime ? new Date(startTime) : null } : {}),
             ...(scheduledAt !== undefined ? { scheduledAt: scheduledAt ? new Date(scheduledAt) : null } : {}),
           },

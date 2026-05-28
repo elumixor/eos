@@ -90,12 +90,17 @@ class TasksStore {
     const cur = this.byId(id);
     if (!cur) return undefined;
     const now = new Date().toISOString();
-    // Mirror server semantics: changing bucket re-stamps scheduledAt.
+    // Mirror server semantics: changing bucket re-stamps scheduledAt;
+    // toggling completed stamps/clears completedAt.
     const bucketChange =
       patch.bucket !== undefined && patch.bucket !== cur.bucket
         ? { scheduledAt: patch.bucket === "later" ? null : now }
         : {};
-    const updated = { ...cur, ...patch, ...bucketChange, updatedAt: now } as Task;
+    const completionChange =
+      patch.completed !== undefined && patch.completed !== cur.completed
+        ? { completedAt: patch.completed ? now : null }
+        : {};
+    const updated = { ...cur, ...patch, ...bucketChange, ...completionChange, updatedAt: now } as Task;
     this.list = this.list.map((t) => (t.id === id ? updated : t));
     await put("tasks", updated);
     await enqueue({

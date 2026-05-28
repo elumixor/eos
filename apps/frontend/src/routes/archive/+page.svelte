@@ -24,13 +24,17 @@
     }),
   );
 
-  // Group by the calendar day of updatedAt (which is also the completion
-  // timestamp when toggling done is the last write).
+  // Group by completedAt (falls back to updatedAt for legacy rows that
+  // pre-date the column).
   type Group = { key: string; label: string; tasks: Task[] };
+  function completionStamp(t: Task): string {
+    return ((t as Task & { completedAt?: string | null }).completedAt ??
+      (t.updatedAt as unknown as string));
+  }
   const groups = $derived.by<Group[]>(() => {
     const byDay = new Map<string, Task[]>();
     for (const t of filtered) {
-      const d = new Date(t.updatedAt as unknown as string);
+      const d = new Date(completionStamp(t));
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const arr = byDay.get(key) ?? [];
       arr.push(t);
@@ -41,9 +45,11 @@
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
     return keys.map((k) => {
-      const tasks = (byDay.get(k) ?? []).sort((a, b) =>
-        a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
-      );
+      const tasks = (byDay.get(k) ?? []).sort((a, b) => {
+        const sa = completionStamp(a);
+        const sb = completionStamp(b);
+        return sa < sb ? 1 : sa > sb ? -1 : 0;
+      });
       const [y, m, d] = k.split("-").map(Number);
       const date = new Date(y, m - 1, d);
       let label: string;
@@ -96,6 +102,50 @@
   async function handleBulkComplete(ids: string[], completed: boolean) {
     for (const id of ids) await tasksStore.update(id, { completed });
   }
+
+  // Infinite scroll: keep ~50 tasks in the DOM, append the next page when the
+  // sentinel near the bottom intersects the viewport. Pagination is over the
+  // flat task list (so a single huge day still chunks), then re-grouped.
+  const PAGE = 50;
+  let limit = $state(PAGE);
+  $effect(() => {
+    // Reset the window when the filter changes (filtered.length is the cue).
+    void filtered.length;
+    limit = PAGE;
+  });
+  const pagedGroups = $derived.by<Group[]>(() => {
+    let remaining = limit;
+    const out: Group[] = [];
+    for (const g of groups) {
+      if (remaining <= 0) break;
+      if (g.tasks.length <= remaining) {
+        out.push(g);
+        remaining -= g.tasks.length;
+      } else {
+        out.push({ ...g, tasks: g.tasks.slice(0, remaining) });
+        remaining = 0;
+      }
+    }
+    return out;
+  });
+  const hasMore = $derived(
+    pagedGroups.reduce((n, g) => n + g.tasks.length, 0) < filtered.length,
+  );
+
+  let sentinel: HTMLElement | undefined = $state();
+  $effect(() => {
+    if (!sentinel) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting) && hasMore) {
+          limit += PAGE;
+        }
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  });
 </script>
 
 <main class="relative max-w-md mx-auto px-5 pt-6 pb-12 safe-top min-h-screen">
@@ -119,7 +169,7 @@
     </p>
   {:else}
     <div class="space-y-6">
-      {#each groups as g (g.key)}
+      {#each pagedGroups as g (g.key)}
         {@const orderedIds = g.tasks.map((t) => t.id)}
         <section>
           <h2
@@ -145,6 +195,11 @@
           </ul>
         </section>
       {/each}
+      {#if hasMore}
+        <div bind:this={sentinel} class="h-8 flex items-center justify-center text-[11px] text-[var(--color-ink-3)]">
+          Loading more…
+        </div>
+      {/if}
     </div>
   {/if}
 </main>

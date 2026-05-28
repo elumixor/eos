@@ -52,6 +52,7 @@ model Task {
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   text        String
   completed   Boolean   @default(false)
+  completedAt DateTime?
   order       Int       @default(0)
   // Which fixed bucket the task lives in: "today" | "week" | "later".
   // "overdue" is purely derived (today/week tasks whose scheduledAt period
