@@ -85,6 +85,13 @@ html {
   /* Kill the trackpad two-finger back/forward navigation so horizontal
      swipes over task rows act on the row, not the browser history. */
   overscroll-behavior-x: none;
+  /* Belt-and-braces against horizontal page scroll. Task rows render an
+     absolutely-positioned checkbox that extrudes outside the row's left
+     edge, and pills (links/places) are `white-space: nowrap` so a single
+     long token could push past the viewport. `clip` (not `hidden`) avoids
+     creating a new scroll container, so `position: fixed` overlays still
+     anchor to the viewport. */
+  overflow-x: clip;
 }
 
 body {
@@ -94,6 +101,7 @@ body {
   min-height: 100dvh;
   background-color: var(--color-bg);
   position: relative;
+  overflow-x: clip;
 }
 
 /* Subtle noise texture overlay.
@@ -266,6 +274,11 @@ html.light .pill-place { color: oklch(42% 0.13 155); }
   color: oklch(78% 0.11 235);
   padding-left: 7px;
   text-decoration: none;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 html.light .pill-link { color: oklch(42% 0.14 235); }
 .pill-link:hover { filter: brightness(1.15); }
