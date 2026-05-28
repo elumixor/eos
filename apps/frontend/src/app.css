@@ -336,7 +336,8 @@ html.light .pill-link { color: oklch(42% 0.14 235); }
 }
 
 /* ── @-mention rich input + picker ────────────────────────────── */
-.rich-input:empty::before {
+.rich-input:empty::before,
+.rich-input[data-empty="true"]::before {
   content: attr(data-placeholder);
   color: var(--color-ink-3);
   pointer-events: none;
@@ -346,19 +347,18 @@ html.light .pill-link { color: oklch(42% 0.14 235); }
   word-break: break-word;
   caret-color: var(--color-accent);
 }
-/* Reserve bottom-right space for an inline send button. The pseudo floats at
-   the end of the text flow with shape-outside cropped to its bottom edge, so
-   text wraps around the button only on the lines next to it. */
-.rich-input-end-reserve::after {
-  content: "";
-  display: block;
+/* Inline reserve element (first child of the editor) that floats right and
+   carves out only the bottom-right corner via shape-outside, so text wraps
+   around the inline send button instead of overlapping it. */
+.rich-input-reserve {
   float: right;
-  width: 32px;
-  height: 32px;
-  shape-outside: inset(0);
-  /* Pull the reserve down to the bottom of the box even when text is short,
-     so a single-line input still shows the button in its corner. */
-  margin-bottom: -2px;
+  width: 36px;
+  /* Fallback if JS hasn't synced yet; updated inline via ResizeObserver. */
+  height: 100%;
+  user-select: none;
+  pointer-events: none;
+  color: transparent;
+  shape-outside: polygon(0 calc(100% - 36px), 100% calc(100% - 36px), 100% 100%, 0 100%);
 }
 
 emoji-picker {
