@@ -195,6 +195,17 @@ html.dnd-dragging * {
   animation: check-pop 0.3s var(--ease-spring);
 }
 
+@keyframes archive-pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.45) rotate(-6deg); }
+  70%  { transform: scale(0.95) rotate(2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.animate-archive-pop {
+  animation: archive-pop 0.45s var(--ease-spring);
+  color: var(--color-accent);
+}
+
 .animate-glow-pulse {
   animation: glow-pulse 1.6s ease-in-out infinite;
 }

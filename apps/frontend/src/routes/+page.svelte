@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Loader2, Settings as SettingsIcon, X } from "lucide-svelte";
+  import { Archive, Loader2, Settings as SettingsIcon, X } from "lucide-svelte";
+  import { archivePop, isArchived } from "$lib/archive.svelte";
   import RichTaskInput from "$lib/components/RichTaskInput.svelte";
   import { api, type Bucket, type Task } from "$lib/api";
   import { dnd } from "$lib/dnd.svelte";
@@ -47,10 +48,27 @@
 
   // Bucketing: stored bucket + scheduledAt, with overdue derived for
   // today/week tasks whose stamp is in a previous period.
+  // Completed tasks that have rolled off (overdue/later display) live in the
+  // archive view, not in the main sections. Today/week sections keep their
+  // own completed items so the dopamine of crossing-out stays in place.
   const buckets = $derived.by(() => {
     const out: Record<SectionKey, Task[]> = { overdue: [], today: [], week: [], later: [] };
-    for (const t of visibleTasks) out[displayBucket(t)].push(t);
+    for (const t of visibleTasks) {
+      if (isArchived(t)) continue;
+      out[displayBucket(t)].push(t);
+    }
     return out;
+  });
+  const archivedCount = $derived(tasks.filter((t) => isArchived(t)).length);
+
+  // Scale-pop the archive button each time a task transitions into archive.
+  let popClass = $state("");
+  let popTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    if (archivePop.tick === 0) return;
+    popClass = "animate-archive-pop";
+    if (popTimer) clearTimeout(popTimer);
+    popTimer = setTimeout(() => (popClass = ""), 450);
   });
 
   const draggedTask = $derived(
@@ -165,6 +183,7 @@
     const id = task.id;
     const target = !task.completed;
     if (!confirmedToggle.has(id)) confirmedToggle.set(id, task.completed);
+    if (target && isArchived({ ...task, completed: true })) archivePop.bump();
     const seq = (toggleSeq.get(id) ?? 0) + 1;
     toggleSeq.set(id, seq);
     try {
@@ -241,6 +260,21 @@
 
 <main class="relative max-w-md mx-auto px-5 pt-6 pb-36 safe-top min-h-screen">
   <header class="flex items-center gap-3 mb-6">
+    <a
+      href="/archive"
+      aria-label="Archive ({archivedCount})"
+      class="shrink-0 relative leading-none text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
+        transition-colors {popClass}"
+    >
+      <Archive size={18} strokeWidth={1.75} />
+      {#if archivedCount > 0}
+        <span
+          class="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-1 rounded-full
+            bg-[var(--color-accent)] text-[var(--color-bg)] text-[9px] font-semibold leading-[14px]
+            text-center"
+        >{archivedCount > 99 ? "99+" : archivedCount}</span>
+      {/if}
+    </a>
     <div class="flex-1 min-w-0">
       <FilterBar />
     </div>
