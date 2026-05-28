@@ -212,6 +212,13 @@
     const moved = Math.abs(lastX - startX) > 6 || Math.abs(lastY - startY) > 6;
     if (moved) return;
     if (wasLp) return; // long-press already opened the menu; tap-up does nothing
+    if (e.pointerType !== "mouse") {
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae?.isContentEditable && !el?.contains(ae)) {
+        ae.blur();
+        return;
+      }
+    }
     if (modShift) {
       multi.rangeFromAnchor(orderedIds, task.id, listId);
     } else if (modMeta) {

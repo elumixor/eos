@@ -47,6 +47,11 @@
   -webkit-user-select: none;
   user-select: none;
 }
+.no-touch-select * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
 /* ── Light theme ──────────────────────────────────────────────── */
 html.light {
