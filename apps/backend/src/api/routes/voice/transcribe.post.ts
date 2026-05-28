@@ -43,6 +43,8 @@ function mediaTypeFor(file: File): string {
   return "audio/ogg";
 }
 
+const historySchema = z.array(z.object({ transcript: z.string(), message: z.string() }));
+
 export default handler(async function* ({ user, event }) {
   requireAuth(user);
   const formData = await readFormData(event);
@@ -52,12 +54,23 @@ export default handler(async function* ({ user, event }) {
   const bytes = new Uint8Array(await audioFile.arrayBuffer());
   const mediaType = mediaTypeFor(audioFile);
 
+  // Prior turns from this conversation. Capped at 10 client-side; we still
+  // defensively trim here so a misbehaving client can't blow up the prompt.
+  const historyRaw = formData.get("history");
+  const historyParsed =
+    typeof historyRaw === "string" ? historySchema.safeParse(JSON.parse(historyRaw)) : null;
+  const history = historyParsed?.success ? historyParsed.data.slice(-10) : [];
+
   const flat = await allTasks(user.id);
   const fmt = (t: { id: string; text: string; completed: boolean }) =>
     `- [${t.completed ? "x" : " "}] (id: ${t.id}) ${t.text}`;
   const context = (["today", "week", "later"] as const)
     .map((b) => {
-      const lines = flat.filter((t) => t.bucket === b).map(fmt).join("\n") || "(none)";
+      const lines =
+        flat
+          .filter((t) => t.bucket === b)
+          .map(fmt)
+          .join("\n") || "(none)";
       return `${b} tasks:\n${lines}`;
     })
     .join("\n\n");
@@ -82,10 +95,18 @@ Rules:
 Current state:
 ${context}`;
 
+  // Replay prior turns as plain text so Gemini has context for follow-ups
+  // like "no, the second one" or "actually call it 'tomorrow' instead".
+  const priorMessages = history.flatMap((h) => [
+    { role: "user" as const, content: h.transcript },
+    { role: "assistant" as const, content: h.message },
+  ]);
+
   const stream = streamText({
     model: gateway("google/gemini-2.5-flash"),
     system: systemPrompt,
     messages: [
+      ...priorMessages,
       {
         role: "user",
         content: [
@@ -121,12 +142,12 @@ ${context}`;
   });
 
   const maxOrder = creates.length
-    ? (
+    ? ((
         await prisma.task.aggregate({
           where: { userId: user.id, bucket: "today" },
           _max: { order: true },
         })
-      )._max.order ?? -1
+      )._max.order ?? -1)
     : -1;
 
   await Promise.all([
@@ -142,14 +163,11 @@ ${context}`;
       }),
     ),
     ...others.map((a) => {
-      if (a.op === "complete")
-        return prisma.task.update({ where: { id: a.id }, data: { completed: true } });
-      if (a.op === "uncomplete")
-        return prisma.task.update({ where: { id: a.id }, data: { completed: false } });
+      if (a.op === "complete") return prisma.task.update({ where: { id: a.id }, data: { completed: true } });
+      if (a.op === "uncomplete") return prisma.task.update({ where: { id: a.id }, data: { completed: false } });
       if (a.op === "edit" && a.text?.trim())
         return prisma.task.update({ where: { id: a.id }, data: { text: a.text.trim() } });
-      if (a.op === "delete")
-        return prisma.task.update({ where: { id: a.id }, data: { deletedAt: new Date() } });
+      if (a.op === "delete") return prisma.task.update({ where: { id: a.id }, data: { deletedAt: new Date() } });
       return Promise.resolve();
     }),
   ]);

@@ -24,6 +24,10 @@
   const tasks = $derived(tasksStore.list);
   let voiceLoading = $state(false);
   let voiceMessage = $state<string | null>(null);
+  // Conversation context for the voice agent. Lives in memory only and
+  // resets when the user dismisses the response panel.
+  let voiceHistory = $state<{ transcript: string; message: string }[]>([]);
+  const VOICE_HISTORY_MAX = 10;
   let addInput: RichTaskInput | undefined = $state();
   let pickerOpen = $state(false);
 
@@ -231,6 +235,7 @@
     try {
       const formData = new FormData();
       formData.append("audio", file);
+      if (voiceHistory.length > 0) formData.append("history", JSON.stringify(voiceHistory));
       const stream = api.voice.transcribe.$post(formData);
       for await (const ev of stream) {
         if (ev.type === "message") voiceMessage = (voiceMessage ?? "") + ev.text;
@@ -239,11 +244,22 @@
       // Final reconciliation: prefer the complete server message in case any
       // streamed character was missed mid-flight.
       if (result.message) voiceMessage = result.message;
+      if (result.transcription || result.message) {
+        voiceHistory = [
+          ...voiceHistory,
+          { transcript: result.transcription ?? "", message: result.message ?? "" },
+        ].slice(-VOICE_HISTORY_MAX);
+      }
     } catch {
       voiceMessage = "Something went wrong processing that. Please try again.";
     } finally {
       voiceLoading = false;
     }
+  }
+
+  function dismissVoice() {
+    voiceMessage = null;
+    voiceHistory = [];
   }
 
   function handleVoiceError(message: string) {
@@ -337,7 +353,7 @@
           </p>
           {#if !voiceLoading && voiceMessage}
             <button
-              onclick={() => (voiceMessage = null)}
+              onclick={dismissVoice}
               aria-label="Dismiss"
               class="shrink-0 p-1 -mt-0.5 rounded-lg text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
                 hover:bg-[var(--color-surface-3)] transition-colors"
