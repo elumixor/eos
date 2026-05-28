@@ -7,7 +7,7 @@ variable "vercel_api_token" {
 variable "vercel_team" {
   description = "Vercel team slug that owns the projects."
   type        = string
-  default     = "todoroappatma-4183s-projects"
+  default     = "elumixors-projects"
 }
 
 variable "github_token" {
@@ -90,4 +90,17 @@ variable "apple_web_client_id" {
   type        = string
   sensitive   = true
   default     = ""
+}
+
+# Frontend-only build-time vars (must be present at `vite build`).
+variable "vite_google_maps_api_key" {
+  description = "Google Maps JS SDK key used by the frontend."
+  type        = string
+  sensitive   = true
+}
+
+variable "vite_apple_redirect_url" {
+  description = "Apple Sign-In redirect URL — must also be registered in Apple Developer Console."
+  type        = string
+  default     = "https://puretype.app/auth/apple/callback"
 }

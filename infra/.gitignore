@@ -3,5 +3,6 @@
 terraform.tfvars
 *.tfstate
 *.tfstate.*
+*.pre-migration
 crash.log
 crash.*.log

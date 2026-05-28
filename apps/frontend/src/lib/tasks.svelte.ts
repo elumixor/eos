@@ -31,8 +31,16 @@ class TasksStore {
       if (!tasks.length) return;
       const map = new Map(this.list.map((t) => [t.id, t]));
       for (const t of tasks) {
-        if ((t as Task & { deletedAt?: string | null }).deletedAt) map.delete(t.id);
-        else map.set(t.id, t);
+        if ((t as Task & { deletedAt?: string | null }).deletedAt) {
+          map.delete(t.id);
+          continue;
+        }
+        // Skip if our local copy is strictly newer — a pull that landed
+        // mid-flight (e.g. right after a local reorder) must not clobber
+        // pending changes that haven't been pushed yet.
+        const cur = map.get(t.id);
+        if (cur && cur.updatedAt > t.updatedAt) continue;
+        map.set(t.id, t);
       }
       this.list = Array.from(map.values());
     });

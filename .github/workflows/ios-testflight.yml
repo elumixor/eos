@@ -17,7 +17,7 @@ jobs:
       APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
       APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
       APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
-      VITE_API_URL: https://eos-backend-todoroappatma-4183s-projects.vercel.app
+      VITE_API_URL: https://api.puretype.app
       VITE_GOOGLE_WEB_CLIENT_ID: ${{ secrets.VITE_GOOGLE_WEB_CLIENT_ID }}
       VITE_GOOGLE_IOS_CLIENT_ID: ${{ secrets.VITE_GOOGLE_IOS_CLIENT_ID }}
       VITE_APPLE_SERVICES_ID: ${{ secrets.VITE_APPLE_SERVICES_ID }}
@@ -70,7 +70,7 @@ jobs:
       - name: Download provisioning profile
         uses: apple-actions/download-provisioning-profiles@v3
         with:
-          bundle-id: com.atma.eos.app
+          bundle-id: app.puretype
           profile-type: IOS_APP_STORE
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}

@@ -16,11 +16,11 @@
 		</dict>
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Eos uses the microphone so you can add and manage tasks by voice.</string>
+	<string>PureType uses the microphone so you can add and manage tasks by voice.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>Eos</string>
+        <string>PureType</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

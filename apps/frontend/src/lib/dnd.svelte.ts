@@ -27,7 +27,11 @@ class Dnd {
   overIndex = $state(0);
   x = $state(0);
   y = $state(0);
+  // Horizontal position is locked at gesture start — drag is vertical-only,
+  // so the ghost never tracks the finger's x.
+  startLeft = $state(0);
   width = $state(0);
+  height = $state(44);
   // Offset of the pointer from the dragged element's top-left at gesture
   // start. The ghost is positioned at (x - offsetX, y - offsetY) so the
   // finger stays at exactly the point on the row it grabbed — no horizontal
@@ -73,7 +77,7 @@ class Dnd {
     from: string,
     ev: { clientX: number; clientY: number },
     width: number,
-    rect?: { left: number; top: number },
+    rect?: { left: number; top: number; height: number },
   ): boolean {
     // Re-entrancy guard: a stray second long-press or future call path that
     // skips finish() must not stomp on in-flight drag state (listeners
@@ -97,9 +101,13 @@ class Dnd {
     if (rect) {
       this.offsetX = ev.clientX - rect.left;
       this.offsetY = ev.clientY - rect.top;
+      this.startLeft = rect.left;
+      this.height = rect.height;
     } else {
       this.offsetX = width / 2;
       this.offsetY = 0;
+      this.startLeft = ev.clientX - width / 2;
+      this.height = 44;
     }
     // Suppress native text selection / iOS touch-callout for the whole drag.
     // The class also sets `touch-action: none`, which prevents the browser
@@ -177,21 +185,38 @@ class Dnd {
     const prevIndex = this.overIndex;
     this.overList = listEl.dataset.dndList ?? null;
 
-    // Items excluding any being dragged, so the index maps directly onto
-    // the post-removal array.
-    const items = [...listEl.querySelectorAll<HTMLElement>("[data-dnd-item]")].filter(
-      (n) => !this.taskIds.includes(n.dataset.dndItem ?? ""),
+    // Walk LI rows. The dragged item is rendered as its own placeholder
+    // slot (TaskItem switches to a dashed-box look while `isDragging`),
+    // so its row represents the live drop slot — no separate placeholder
+    // element shifts neighbours.
+    //
+    // We hit-test against the LI's `offsetTop`/`offsetHeight` rather than
+    // getBoundingClientRect because animate:flip uses transforms to
+    // interpolate row positions, and transforms WOULD show up in the
+    // client rect, making the hit-test thrash mid-animation. offsetTop
+    // is the laid-out (untransformed) position, which is what the user
+    // perceives as the slot grid.
+    //
+    // `postIdx` counts the non-dragged rows seen so far; that's the
+    // splice-index commitDrop wants.
+    const listTop = listEl.getBoundingClientRect().top;
+    const rows = [...listEl.children].filter(
+      (c): c is HTMLElement => c instanceof HTMLElement && !!c.querySelector("[data-dnd-item]"),
     );
-
-    let idx = items.length;
-    for (let i = 0; i < items.length; i++) {
-      const r = items[i].getBoundingClientRect();
-      if (this.pendingY < r.top + r.height / 2) {
-        idx = i;
+    let postIdx = 0;
+    let result = -1;
+    for (const li of rows) {
+      const inner = li.querySelector<HTMLElement>("[data-dnd-item]");
+      const id = inner?.dataset.dndItem ?? "";
+      const isDragged = this.taskIds.includes(id);
+      const mid = listTop + li.offsetTop + li.offsetHeight / 2;
+      if (this.pendingY < mid) {
+        result = postIdx;
         break;
       }
+      if (!isDragged) postIdx++;
     }
-    this.overIndex = idx;
+    this.overIndex = result === -1 ? postIdx : result;
 
     // Tick whenever the drop slot moves so the drag feels physical.
     if (this.overList !== prevList || this.overIndex !== prevIndex) selection();

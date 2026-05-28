@@ -3,7 +3,7 @@ locals {
 }
 
 resource "vercel_project" "backend" {
-  name      = "eos-backend"
+  name      = "puretype-backend"
   framework = "nitro"
 
   root_directory   = "apps/backend"
@@ -23,7 +23,7 @@ resource "vercel_project" "backend" {
 }
 
 resource "vercel_project" "frontend" {
-  name      = "eos-frontend"
+  name      = "puretype-frontend"
   framework = "sveltekit"
 
   root_directory  = "apps/frontend"
@@ -41,8 +41,20 @@ resource "vercel_project" "frontend" {
   }
 }
 
-# --- Backend env vars (managed by terraform).
-# Values live in terraform.tfvars (gitignored). Apply pushes them to Vercel.
+# --- Domain attached to the frontend project.
+# puretype.app is registered on the elumixor Vercel account; attaching here.
+
+resource "vercel_project_domain" "frontend_puretype" {
+  project_id = vercel_project.frontend.id
+  domain     = "puretype.app"
+}
+
+resource "vercel_project_domain" "backend_api_puretype" {
+  project_id = vercel_project.backend.id
+  domain     = "api.puretype.app"
+}
+
+# --- Backend env vars.
 
 resource "vercel_project_environment_variable" "backend_openai_api_key" {
   project_id = vercel_project.backend.id
@@ -124,4 +136,46 @@ resource "vercel_project_environment_variable" "backend_apple_web_client_id" {
   value      = var.apple_web_client_id
   target     = ["production", "preview"]
   sensitive  = true
+}
+
+# --- Frontend build-time vars.
+# These are baked into the Vite bundle at build time. The VITE_GOOGLE_*
+# values intentionally mirror their backend counterparts (same OAuth client).
+
+resource "vercel_project_environment_variable" "frontend_vite_google_maps_api_key" {
+  project_id = vercel_project.frontend.id
+  key        = "VITE_GOOGLE_MAPS_API_KEY"
+  value      = var.vite_google_maps_api_key
+  target     = ["production", "preview"]
+  sensitive  = true
+}
+
+resource "vercel_project_environment_variable" "frontend_vite_google_web_client_id" {
+  project_id = vercel_project.frontend.id
+  key        = "VITE_GOOGLE_WEB_CLIENT_ID"
+  value      = var.google_client_id
+  target     = ["production", "preview"]
+}
+
+resource "vercel_project_environment_variable" "frontend_vite_google_ios_client_id" {
+  count      = var.google_ios_client_id == "" ? 0 : 1
+  project_id = vercel_project.frontend.id
+  key        = "VITE_GOOGLE_IOS_CLIENT_ID"
+  value      = var.google_ios_client_id
+  target     = ["production", "preview"]
+}
+
+resource "vercel_project_environment_variable" "frontend_vite_apple_services_id" {
+  count      = var.apple_web_client_id == "" ? 0 : 1
+  project_id = vercel_project.frontend.id
+  key        = "VITE_APPLE_SERVICES_ID"
+  value      = var.apple_web_client_id
+  target     = ["production", "preview"]
+}
+
+resource "vercel_project_environment_variable" "frontend_vite_apple_redirect_url" {
+  project_id = vercel_project.frontend.id
+  key        = "VITE_APPLE_REDIRECT_URL"
+  value      = var.vite_apple_redirect_url
+  target     = ["production", "preview"]
 }

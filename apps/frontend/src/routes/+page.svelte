@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Archive, Loader2, Settings as SettingsIcon, X } from "lucide-svelte";
+  import { Loader2, X } from "lucide-svelte";
   import { archivePop, isArchived } from "$lib/archive.svelte";
   import RichTaskInput from "$lib/components/RichTaskInput.svelte";
   import { api, type Bucket, type Task } from "$lib/api";
@@ -11,8 +11,8 @@
   import { displayBucket, extractFields, projectIds, type DisplayBucket } from "$lib/tokens";
   import { ls } from "$lib/storage";
   import BucketSection from "$lib/components/BucketSection.svelte";
-  import FilterBar from "$lib/components/FilterBar.svelte";
   import ProjectPicker from "$lib/components/ProjectPicker.svelte";
+  import TopBar from "$lib/components/TopBar.svelte";
   import TaskContent from "$lib/components/TaskContent.svelte";
   import VoiceButton from "$lib/components/VoiceButton.svelte";
   import BoxSelect from "$lib/components/BoxSelect.svelte";
@@ -145,48 +145,56 @@
 
     const dragged = taskIds
       .map((id) => tasksStore.byId(id))
-      .filter((t): t is Task => !!t)
-      .sort((a, b) => a.order - b.order);
+      .filter((t): t is Task => !!t);
     if (dragged.length === 0) return;
 
-    // No-op when nothing actually moves: single task, same bucket, dropped
-    // at its current visual position. Without this, `reorder` bumps
-    // `updatedAt` and the done-section (sorted by updatedAt desc) jumps the
-    // task to the top of "done" even though the user just released it
-    // where it started.
-    if (dragged.length === 1) {
+    // Build peers in the SAME order TaskList renders — pending sorted by
+    // `order`, then done sorted by `updatedAt` desc. The `index` from dnd
+    // is the placeholder's slot in *that* visual list, so we must splice
+    // into the visual list, not an order-sorted one, or the drop lands
+    // at a different slot than the placeholder showed.
+    const draggedIds = new Set(dragged.map((t) => t.id));
+    const bucketPeers = tasks.filter(
+      (t) => !draggedIds.has(t.id) && t.bucket === targetBucket && !isArchived(t),
+    );
+    const pendingPeers: Task[] = [];
+    const donePeers: Task[] = [];
+    for (const t of bucketPeers) (t.completed ? donePeers : pendingPeers).push(t);
+    pendingPeers.sort((a, b) => a.order - b.order);
+    donePeers.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+    const visualPeers = [...pendingPeers, ...donePeers];
+    const at = Math.max(0, Math.min(index, visualPeers.length));
+
+    // No-op: same bucket, dropped right where the placeholder already
+    // sat — skip so we don't bump updatedAt and scramble the done block.
+    if (dragged.length === 1 && dragged[0].bucket === targetBucket) {
       const t = dragged[0];
-      if (t.bucket === targetBucket) {
-        const bucketTasks = tasks.filter((x) => x.bucket === targetBucket && !isArchived(x));
-        const pending: Task[] = [];
-        const done: Task[] = [];
-        for (const x of bucketTasks) (x.completed ? done : pending).push(x);
-        pending.sort((a, b) => a.order - b.order);
-        done.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
-        const visual = [...pending, ...done];
-        const curIdx = visual.findIndex((x) => x.id === t.id);
-        if (curIdx === index) return;
-      }
+      const curIdx = t.completed
+        ? pendingPeers.length +
+          [...donePeers, t]
+            .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+            .indexOf(t)
+        : [...pendingPeers, t].sort((a, b) => a.order - b.order).indexOf(t);
+      if (curIdx === at) return;
     }
 
-    // Reorder within the destination bucket. The store re-stamps
-    // scheduledAt for any task whose bucket changed.
-    const draggedIds = new Set(dragged.map((t) => t.id));
-    const peers = tasks
-      .filter((t) => !draggedIds.has(t.id) && t.bucket === targetBucket)
-      .sort((a, b) => a.order - b.order);
-    const at = Math.max(0, Math.min(index, peers.length));
-    peers.splice(at, 0, ...dragged);
+    visualPeers.splice(at, 0, ...dragged);
 
-    // Apply bucket change first (so the store re-stamps scheduledAt and
-    // enqueues the right outbox op), then commit positions in one batch.
+    // Apply bucket change first (re-stamps scheduledAt + enqueues op).
     for (const t of dragged) {
       if (t.bucket !== targetBucket) {
         await tasksStore.update(t.id, { bucket: targetBucket });
       }
     }
+
+    // Only reorder the pending half. Done tasks sort by `updatedAt`, so
+    // re-numbering them does nothing useful and would bump their
+    // updatedAt, scrambling the done block. A done task dropped into the
+    // pending area still surfaces to the top of done via the bucket
+    // update above (or, if same bucket, was caught by the no-op check).
+    const newPending = visualPeers.filter((t) => !t.completed);
     await tasksStore.reorder(
-      peers.map((t, i) => ({ id: t.id, order: i, bucket: targetBucket })),
+      newPending.map((t, i) => ({ id: t.id, order: i, bucket: targetBucket })),
     );
   }
 
@@ -292,6 +300,15 @@
     voiceMessage = message;
   }
 
+  $effect(() => {
+    if (!voiceMessage || voiceLoading) return;
+    const timer = setTimeout(() => {
+      voiceMessage = null;
+      voiceHistory = [];
+    }, 5000);
+    return () => clearTimeout(timer);
+  });
+
   const SECTION_ORDER: SectionKey[] = ["overdue", "today", "week", "later"];
   const SECTION_TITLE: Record<SectionKey, string> = {
     overdue: "Overdue",
@@ -304,35 +321,12 @@
 <div class="fixed top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] pointer-events-none
   bg-[radial-gradient(ellipse_at_center,var(--color-accent-glow)_0%,transparent_70%)] opacity-40"></div>
 
-<main class="relative max-w-md mx-auto px-5 pt-6 pb-36 safe-top min-h-screen">
-  <header class="flex items-center gap-3 mb-6">
-    <a
-      href="/archive"
-      aria-label="Archive ({archivedCount})"
-      class="shrink-0 relative leading-none text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
-        transition-colors {popClass}"
-    >
-      <Archive size={18} strokeWidth={1.75} />
-      {#if archivedCount > 0}
-        <span
-          class="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-1 rounded-full
-            bg-[var(--color-accent)] text-[var(--color-bg)] text-[9px] font-semibold leading-[14px]
-            text-center"
-        >{archivedCount > 99 ? "99+" : archivedCount}</span>
-      {/if}
-    </a>
-    <div class="flex-1 min-w-0">
-      <FilterBar />
-    </div>
-    <a
-      href="/settings"
-      aria-label="Settings"
-      class="shrink-0 leading-none text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
-        transition-colors"
-    >
-      <SettingsIcon size={18} strokeWidth={1.75} />
-    </a>
-  </header>
+<TopBar {archivedCount} {popClass} />
+
+<main
+  class="relative max-w-md mx-auto px-5 pb-36 min-h-screen"
+  style="padding-top: calc(env(safe-area-inset-top, 0px) + 4.5rem);"
+>
 
   <div class="space-y-5">
     {#each SECTION_ORDER as key (key)}
@@ -361,28 +355,28 @@
 
 <div class="fixed bottom-0 inset-x-0 z-40 pointer-events-none">
   <div
-    class="max-w-md mx-auto px-5 pt-6 pointer-events-auto
-      bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)]/95 to-transparent"
+    class="max-w-md mx-auto px-5 pt-14 pointer-events-auto
+      bg-[linear-gradient(to_top,var(--color-bg)_0%,var(--color-bg)_75%,transparent_100%)]"
     style="padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));"
   >
     {#if voiceMessage || voiceLoading}
       <div
-        class="relative px-4 pt-3 pb-6 -mb-4 rounded-t-2xl bg-[var(--color-surface-2)]
-          border border-b-0 border-[var(--color-border)] animate-fade-up"
+        class="relative px-4 pt-3 pb-6 -mb-4 rounded-t-2xl bg-[var(--color-accent)]
+          border border-b-0 border-[var(--color-accent)] animate-fade-up"
       >
         <div class="flex items-start gap-3">
           <p
-            class="flex-1 min-h-[18px] text-[13px] font-light leading-relaxed text-[var(--color-ink-2)]
+            class="flex-1 min-h-[18px] text-[13px] font-light leading-relaxed text-white
               whitespace-pre-wrap"
           >
-            {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-[var(--color-accent)] animate-pulse"></span>{/if}
+            {voiceMessage}{#if voiceLoading}<span class="inline-block w-1.5 h-1.5 ml-1 align-middle rounded-full bg-white animate-pulse"></span>{/if}
           </p>
           {#if !voiceLoading && voiceMessage}
             <button
               onclick={dismissVoice}
               aria-label="Dismiss"
-              class="shrink-0 p-1 -mt-0.5 rounded-lg text-[var(--color-ink-3)] hover:text-[var(--color-ink)]
-                hover:bg-[var(--color-surface-3)] transition-colors"
+              class="shrink-0 p-1 -mt-0.5 rounded-lg text-white/70 hover:text-white
+                hover:bg-white/10 transition-colors"
             >
               <X size={14} />
             </button>

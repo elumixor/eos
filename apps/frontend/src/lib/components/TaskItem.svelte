@@ -41,10 +41,17 @@
     onBulkComplete: (ids: string[], completed: boolean) => void;
   } = $props();
 
-  let el: HTMLLIElement | undefined = $state();
+  let el: HTMLDivElement | undefined = $state();
   let mainEl: HTMLDivElement | undefined = $state();
   const isDragging = $derived(dnd.has(task.id));
   const isSelected = $derived(multi.has(task.id));
+  // Entry fade only fires on the initial mount. Without this gate a drop
+  // (which toggles isDragging false → reveals the row) would replay the
+  // fade-up because the conditional class swap re-arms the animation.
+  let mounted = $state(false);
+  $effect(() => {
+    mounted = true;
+  });
 
   let editing = $state(false);
 
@@ -309,20 +316,28 @@
   }
 </script>
 
-<li
+<div
   bind:this={el}
   data-dnd-item={task.id}
   class="group relative rounded-2xl
     {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}
-    {isDragging ? 'opacity-30' : 'animate-fade-up'}
+    {!mounted ? 'animate-fade-up' : ''}
     {menuOpen ? 'invisible' : ''}"
   style="animation-delay: {index * 50}ms"
   oncontextmenu={handleContextMenu}
+  role="listitem"
 >
   <div
     bind:this={mainEl}
     class="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl no-touch-select
-      {task.completed ? 'bg-[var(--color-done)]' : 'bg-[var(--color-surface)]'}"
+      outline outline-2 -outline-offset-2 transition-[outline-color,background-color] duration-200
+      {isDragging
+        ? 'bg-[var(--color-accent-dim)] outline-dashed outline-[var(--color-accent)]/40'
+        : editing
+          ? 'bg-[var(--color-surface-2)] outline-[var(--color-accent)]'
+          : task.completed
+            ? 'bg-[var(--color-done)] outline-transparent'
+            : 'bg-[var(--color-surface)] outline-transparent'}"
     style="touch-action: pan-y;"
     role="textbox"
     tabindex="0"
@@ -343,7 +358,7 @@
         onTabNav={navigateTab}
       />
     {:else}
-      <div class="flex-1 min-w-0">
+      <div class="flex-1 min-w-0 {isDragging ? 'invisible' : ''}">
         <TaskContent {task} dimmed={task.completed} />
       </div>
     {/if}
@@ -358,6 +373,7 @@
     aria-label={task.completed ? "Mark incomplete" : "Mark complete"}
     class="absolute -top-1.5 -left-1.5 z-10 w-5 h-5 rounded-md flex items-center justify-center
       border-2 transition-colors
+      {isDragging ? 'invisible' : ''}
       {task.completed
         ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
         : 'bg-[var(--color-bg)] border-[var(--color-ink-3)] hover:border-[var(--color-ink)]'}"
@@ -366,7 +382,7 @@
       <Check size={12} strokeWidth={3} class="text-[var(--color-bg)]" />
     {/if}
   </button>
-</li>
+</div>
 
 {#if menuOpen}
   <div use:portal>
@@ -379,7 +395,7 @@
     ></button>
     {#if taskRect}
       <div
-        class="fixed z-[45] pointer-events-none rounded-2xl
+        class="fixed z-[45] pointer-events-none rounded-2xl animate-drag-lift
           {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}"
         style="left: {taskRect.left}px; top: {taskRect.top}px; width: {taskRect.width}px; height: {taskRect.height}px;"
       >

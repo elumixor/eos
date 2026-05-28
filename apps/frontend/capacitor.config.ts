@@ -11,8 +11,8 @@ function getLocalIP() {
 const useLiveReload = process.env.CAPACITOR_LIVE_RELOAD === "true";
 
 const config: CapacitorConfig = {
-  appId: "com.atma.eos.app",
-  appName: "Eos",
+  appId: "app.puretype",
+  appName: "PureType",
   webDir: "build",
   ...(useLiveReload
     ? {

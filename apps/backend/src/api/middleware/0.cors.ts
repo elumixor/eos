@@ -11,8 +11,6 @@ export default defineEventHandler((event) => {
   setResponseHeaders(event, CORS_HEADERS);
 
   if (event.method === "OPTIONS") {
-    // Construct the preflight response with the headers explicitly — a fresh
-    // Response doesn't inherit what setResponseHeaders set on the event.
-    event.respondWith(new Response(null, { status: 204, headers: CORS_HEADERS }));
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 });
