@@ -33,19 +33,29 @@ platform :ios do
     )
 
     # Regenerate the App Store provisioning profile to include the current
-    # distribution cert.
+    # distribution cert. force:true also forces a re-fetch when the local
+    # state is stale, which CI always is.
     sigh(
       api_key: api_key,
       app_identifier: APP_IDENTIFIER,
       force: true
     )
+    profile_name = lane_context[SharedValues::SIGH_NAME]
 
-    xcargs = ["-allowProvisioningUpdates"]
-    if ENV["APP_STORE_CONNECT_API_KEY_PATH"]
-      xcargs << "-authenticationKeyID #{ENV.fetch('APP_STORE_CONNECT_API_KEY_ID')}"
-      xcargs << "-authenticationKeyIssuerID #{ENV.fetch('APP_STORE_CONNECT_API_KEY_ISSUER_ID')}"
-      xcargs << "-authenticationKeyPath #{ENV.fetch('APP_STORE_CONNECT_API_KEY_PATH')}"
-    end
+    # Manual signing for the archive step. Automatic signing in CI tries to
+    # provision new certs (hits the Apple-side cert cap) and looks for a
+    # Development profile that sigh never creates. Pinning to the profile
+    # sigh just generated avoids both problems.
+    team_id = sh("/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' " \
+                 "/dev/stdin <<< \"$(security cms -D -i " \
+                 "#{lane_context[SharedValues::SIGH_PROFILE_PATH]})\"", log: false).strip
+
+    xcargs = [
+      "CODE_SIGN_STYLE=Manual",
+      "DEVELOPMENT_TEAM=#{team_id}",
+      "PROVISIONING_PROFILE_SPECIFIER='#{profile_name}'",
+      "CODE_SIGN_IDENTITY='Apple Distribution'",
+    ]
 
     build_app(
       project: PROJECT,
@@ -55,7 +65,12 @@ platform :ios do
       output_directory: "build",
       output_name: "App.ipa",
       clean: true,
-      xcargs: xcargs.join(" ")
+      xcargs: xcargs.join(" "),
+      export_options: {
+        method: "app-store",
+        signingStyle: "manual",
+        provisioningProfiles: { APP_IDENTIFIER => profile_name },
+      }
     )
 
     upload_to_testflight(
