@@ -393,7 +393,7 @@
     <div class="relative">
       <RichTaskInput
         bind:this={addInput}
-        placeholder="What needs doing?  (@ for project, time, duration)"
+        placeholder="@ for project, time, place"
         onsubmit={submitNewTask}
       >
         {#snippet endSlot()}

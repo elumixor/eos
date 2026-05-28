@@ -97,47 +97,10 @@
   let qStart = 0;
   let qEnd = 0;
 
-  // Non-editable inline-float "reserve" element kept as the first child of the
-  // editor. With shape-outside cropped to the bottom 32px, text flows freely
-  // through the upper portion and wraps left of the bottom-right send button.
-  // Height is JS-synced to the editor (% heights don't resolve on auto-height
-  // contenteditables).
-  let reserveEl: HTMLSpanElement | undefined;
-  let reserveRO: ResizeObserver | undefined;
-
-  function ensureReserve() {
-    if (!editor || !reserveEl) return;
-    if (editor.firstChild !== reserveEl) editor.prepend(reserveEl);
-  }
-
-  function updateEmptyState() {
-    if (!editor) return;
-    const text = (editor.textContent ?? "").replace(/​/g, "");
-    const hasToken = !!editor.querySelector("[data-token]");
-    const hasBr = !!editor.querySelector("br");
-    editor.dataset.empty = !text && !hasToken && !hasBr ? "true" : "";
-  }
-
   onMount(() => {
     touchDevice = detectTouchDevice();
-    if (editor) {
-      editor.innerHTML = renderEditorHtml(value, projects.list);
-      if (endSlot) {
-        reserveEl = document.createElement("span");
-        reserveEl.contentEditable = "false";
-        reserveEl.className = "rich-input-reserve";
-        reserveEl.setAttribute("data-reserve", "1");
-        reserveEl.textContent = "​";
-        editor.prepend(reserveEl);
-        reserveRO = new ResizeObserver(() => {
-          if (reserveEl && editor) reserveEl.style.height = `${editor.clientHeight}px`;
-        });
-        reserveRO.observe(editor);
-      }
-      updateEmptyState();
-    }
+    if (editor) editor.innerHTML = renderEditorHtml(value, projects.list);
     if (autofocus) focusEnd();
-    return () => reserveRO?.disconnect();
   });
 
   function focusEnd() {
@@ -359,10 +322,7 @@
 
   // Exposed so a parent submit button can trigger it.
   export function clear() {
-    if (!editor) return;
-    editor.innerHTML = "";
-    ensureReserve();
-    updateEmptyState();
+    if (editor) editor.innerHTML = "";
   }
   export { submit };
 
@@ -464,8 +424,12 @@
   }
 
   async function onInput() {
-    ensureReserve();
-    updateEmptyState();
+    if (
+      editor &&
+      (editor.textContent ?? "").replace(/​/g, "") === "" &&
+      !editor.querySelector("[data-token]")
+    )
+      editor.innerHTML = "";
     await tick();
     detectQuery();
   }
@@ -481,7 +445,7 @@
     data-placeholder={placeholder}
     class={flush
       ? "rich-input text-[13px] font-light tracking-wide leading-[21px] min-h-[21px] focus:outline-none"
-      : "rich-input min-h-[46px] px-4 py-3 rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide leading-[1.7] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300"}
+      : `rich-input min-h-[46px] py-3 pl-4 ${endSlot ? "pr-11" : "pr-4"} rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide leading-[1.7] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300`}
     oninput={onInput}
     onkeydown={onKeydown}
     oncopy={onCopy}

@@ -336,8 +336,7 @@ html.light .pill-link { color: oklch(42% 0.14 235); }
 }
 
 /* ── @-mention rich input + picker ────────────────────────────── */
-.rich-input:empty::before,
-.rich-input[data-empty="true"]::before {
+.rich-input:empty::before {
   content: attr(data-placeholder);
   color: var(--color-ink-3);
   pointer-events: none;
@@ -346,19 +345,6 @@ html.light .pill-link { color: oklch(42% 0.14 235); }
   white-space: pre-wrap;
   word-break: break-word;
   caret-color: var(--color-accent);
-}
-/* Inline reserve element (first child of the editor) that floats right and
-   carves out only the bottom-right corner via shape-outside, so text wraps
-   around the inline send button instead of overlapping it. */
-.rich-input-reserve {
-  float: right;
-  width: 36px;
-  /* Fallback if JS hasn't synced yet; updated inline via ResizeObserver. */
-  height: 100%;
-  user-select: none;
-  pointer-events: none;
-  color: transparent;
-  shape-outside: polygon(0 calc(100% - 36px), 100% calc(100% - 36px), 100% 100%, 0 100%);
 }
 
 emoji-picker {
