@@ -237,10 +237,15 @@
   let menuY = $state(0);
   let menuEl: HTMLDivElement | undefined = $state();
   let bulkCtx = $state(false);
+  let taskRect = $state<{ left: number; top: number; width: number; height: number } | null>(null);
 
   function openMenu(x: number, y: number) {
     menuX = x;
     menuY = y;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      taskRect = { left: r.left, top: r.top, width: r.width, height: r.height };
+    }
     menuOpen = true;
     tapMedium();
   }
@@ -303,7 +308,7 @@
   class="group relative rounded-2xl
     {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}
     {isDragging ? 'opacity-30' : 'animate-fade-up'}
-    {menuOpen ? 'z-50' : ''}"
+    {menuOpen ? 'invisible' : ''}"
   style="animation-delay: {index * 50}ms"
   oncontextmenu={handleContextMenu}
 >
@@ -365,6 +370,22 @@
       onpointerup={(e) => e.stopPropagation()}
       onclick={() => (menuOpen = false)}
     ></button>
+    {#if taskRect}
+      <div
+        class="fixed z-[45] pointer-events-none rounded-2xl
+          {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}"
+        style="left: {taskRect.left}px; top: {taskRect.top}px; width: {taskRect.width}px; height: {taskRect.height}px;"
+      >
+        <div
+          class="flex items-center gap-2.5 px-4 py-3.5 rounded-2xl h-full
+            {task.completed ? 'bg-[var(--color-done)]' : 'bg-[var(--color-surface)]'}"
+        >
+          <div class="flex-1 min-w-0">
+            <TaskContent {task} dimmed={task.completed} />
+          </div>
+        </div>
+      </div>
+    {/if}
     <div
       bind:this={menuEl}
       class="fixed z-[55] w-48 py-1.5 rounded-2xl bg-[var(--color-surface-2)] no-touch-select
