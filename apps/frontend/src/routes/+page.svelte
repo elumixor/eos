@@ -149,6 +149,26 @@
       .sort((a, b) => a.order - b.order);
     if (dragged.length === 0) return;
 
+    // No-op when nothing actually moves: single task, same bucket, dropped
+    // at its current visual position. Without this, `reorder` bumps
+    // `updatedAt` and the done-section (sorted by updatedAt desc) jumps the
+    // task to the top of "done" even though the user just released it
+    // where it started.
+    if (dragged.length === 1) {
+      const t = dragged[0];
+      if (t.bucket === targetBucket) {
+        const bucketTasks = tasks.filter((x) => x.bucket === targetBucket && !isArchived(x));
+        const pending: Task[] = [];
+        const done: Task[] = [];
+        for (const x of bucketTasks) (x.completed ? done : pending).push(x);
+        pending.sort((a, b) => a.order - b.order);
+        done.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+        const visual = [...pending, ...done];
+        const curIdx = visual.findIndex((x) => x.id === t.id);
+        if (curIdx === index) return;
+      }
+    }
+
     // Reorder within the destination bucket. The store re-stamps
     // scheduledAt for any task whose bucket changed.
     const draggedIds = new Set(dragged.map((t) => t.id));
@@ -187,11 +207,17 @@
     const id = task.id;
     const target = !task.completed;
     if (!confirmedToggle.has(id)) confirmedToggle.set(id, task.completed);
-    if (target && isArchived({ ...task, completed: true })) archivePop.bump();
+    // Completing a "later" task pulls it into Today so the user sees the win
+    // instead of the task vanishing straight to archive.
+    const promote = target && task.bucket === "later";
+    const patch: Partial<Task> = promote
+      ? ({ completed: target, bucket: "today" } as Partial<Task>)
+      : { completed: target };
+    if (target && !promote && isArchived({ ...task, completed: true })) archivePop.bump();
     const seq = (toggleSeq.get(id) ?? 0) + 1;
     toggleSeq.set(id, seq);
     try {
-      const updated = await tasksStore.update(id, { completed: target });
+      const updated = await tasksStore.update(id, patch);
       if (toggleSeq.get(id) !== seq) return;
       if (updated) confirmedToggle.set(id, updated.completed);
       toggleSeq.delete(id);
@@ -364,23 +390,27 @@
         </div>
       </div>
     {/if}
-    <div class="relative flex gap-2 items-start">
+    <div class="relative">
       <RichTaskInput
         bind:this={addInput}
         placeholder="What needs doing?  (@ for project, time, duration)"
         onsubmit={submitNewTask}
-      />
-      {#if voiceLoading}
-        <div class="w-11 h-[46px] rounded-2xl bg-[var(--color-surface-2)] flex items-center justify-center shrink-0">
-          <Loader2 size={18} class="animate-spin text-[var(--color-ink-2)]" />
-        </div>
-      {:else}
-        <VoiceButton
-          onRecorded={handleVoiceRecorded}
-          onError={handleVoiceError}
-          onTapSend={() => addInput?.submit()}
-        />
-      {/if}
+      >
+        {#snippet endSlot()}
+          {#if voiceLoading}
+            <div class="w-8 h-8 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center">
+              <Loader2 size={14} class="animate-spin text-[var(--color-ink-2)]" />
+            </div>
+          {:else}
+            <VoiceButton
+              compact
+              onRecorded={handleVoiceRecorded}
+              onError={handleVoiceError}
+              onTapSend={() => addInput?.submit()}
+            />
+          {/if}
+        {/snippet}
+      </RichTaskInput>
     </div>
   </div>
 </div>
@@ -393,8 +423,8 @@
   <div
     class="fixed z-50 pointer-events-none px-4 py-3.5 rounded-2xl bg-[var(--color-surface-2)]
       shadow-xl shadow-black/40 text-[13px] font-light tracking-wide text-[var(--color-ink)]
-      border border-[var(--color-accent)]/30"
-    style="left: {dnd.x - dnd.offsetX}px; top: {dnd.y - dnd.offsetY}px; width: {dnd.width}px;"
+      border border-[var(--color-accent)]/30 animate-drag-lift"
+    style="left: {dnd.startLeft}px; top: {dnd.y - dnd.offsetY}px; width: {dnd.width}px;"
   >
     {#if dnd.taskIds.length > 1}
       <span class="font-medium text-[var(--color-accent)]">{dnd.label}</span>

@@ -195,6 +195,16 @@ html.dnd-dragging * {
   animation: check-pop 0.3s var(--ease-spring);
 }
 
+@keyframes drag-lift {
+  from { transform: scale(1); }
+  to { transform: scale(1.05); }
+}
+.animate-drag-lift {
+  animation: drag-lift 0.36s var(--ease-spring) forwards;
+  transform-origin: center;
+  will-change: transform;
+}
+
 @keyframes archive-pop {
   0%   { transform: scale(1); }
   35%  { transform: scale(1.45) rotate(-6deg); }
@@ -335,6 +345,20 @@ html.light .pill-link { color: oklch(42% 0.14 235); }
   white-space: pre-wrap;
   word-break: break-word;
   caret-color: var(--color-accent);
+}
+/* Reserve bottom-right space for an inline send button. The pseudo floats at
+   the end of the text flow with shape-outside cropped to its bottom edge, so
+   text wraps around the button only on the lines next to it. */
+.rich-input-end-reserve::after {
+  content: "";
+  display: block;
+  float: right;
+  width: 32px;
+  height: 32px;
+  shape-outside: inset(0);
+  /* Pull the reserve down to the bottom of the box even when text is short,
+     so a single-line input still shows the button in its corner. */
+  margin-bottom: -2px;
 }
 
 emoji-picker {

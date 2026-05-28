@@ -27,6 +27,7 @@
     autofocus = false,
     submitOnBlur = false,
     flush = false,
+    endSlot,
     onsubmit,
     onTabNav,
   }: {
@@ -37,6 +38,9 @@
     /** Render with no chrome (padding/border/background) — for inline use
         inside an existing row that already provides those. */
     flush?: boolean;
+    /** Snippet rendered absolutely in the bottom-right corner of the input.
+        Text wraps around it via a floated ::after on the contenteditable. */
+    endSlot?: import("svelte").Snippet;
     onsubmit: (text: string) => void;
     /** Tab/Shift+Tab pressed with no autocomplete open — commit and move focus. */
     onTabNav?: (dir: 1 | -1) => void;
@@ -440,8 +444,8 @@
     contenteditable="true"
     data-placeholder={placeholder}
     class={flush
-      ? "rich-input text-[13px] font-light tracking-wide leading-relaxed focus:outline-none"
-      : "rich-input min-h-[46px] px-4 py-3 rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide leading-[1.7] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300"}
+      ? "rich-input text-[13px] font-light tracking-wide leading-[21px] min-h-[21px] focus:outline-none"
+      : `rich-input min-h-[46px] px-4 py-3 rounded-2xl bg-[var(--color-surface)] text-[13px] font-light tracking-wide leading-[1.7] border border-[var(--color-border)] focus:border-[var(--color-accent)] focus:bg-[var(--color-surface-2)] focus:outline-none transition-all duration-300${endSlot ? " rich-input-end-reserve" : ""}`}
     oninput={onInput}
     onkeydown={onKeydown}
     oncopy={onCopy}
@@ -453,6 +457,12 @@
         if (submitOnBlur) submit();
       }, 150)}
   ></div>
+
+  {#if endSlot}
+    <div class="absolute right-2 bottom-2 pointer-events-auto">
+      {@render endSlot()}
+    </div>
+  {/if}
 
   {#if open}
     <div

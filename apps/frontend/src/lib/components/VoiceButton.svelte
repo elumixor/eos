@@ -6,10 +6,12 @@
     onTapSend,
     onRecorded,
     onError,
+    compact = false,
   }: {
     onTapSend: () => void;
     onRecorded: (file: File) => void;
     onError: (message: string) => void;
+    compact?: boolean;
   } = $props();
 
   const HOLD_MS = 280;
@@ -135,15 +137,15 @@
   onpointercancel={onPointerCancel}
   oncontextmenu={(e) => e.preventDefault()}
   aria-label={recording ? "Release to send voice" : "Send (hold to record voice)"}
-  class="w-11 h-[46px] rounded-2xl flex items-center justify-center shrink-0
+  class="{compact ? 'w-8 h-8 rounded-xl' : 'w-11 h-[46px] rounded-2xl'} flex items-center justify-center shrink-0
     select-none touch-none [-webkit-touch-callout:none] [-webkit-user-select:none]
     {recording
       ? 'bg-[var(--color-voice)] animate-glow-pulse'
       : 'bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] transition-all duration-300 hover:shadow-lg hover:shadow-[var(--color-accent-glow)] active:scale-95'}"
 >
   {#if recording}
-    <Mic size={18} class="text-white" />
+    <Mic size={compact ? 14 : 18} class="text-white" />
   {:else}
-    <Plus size={18} strokeWidth={2.5} class="text-[var(--color-bg)]" />
+    <Plus size={compact ? 14 : 18} strokeWidth={2.5} class="text-[var(--color-bg)]" />
   {/if}
 </button>
