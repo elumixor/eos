@@ -302,7 +302,8 @@
   data-dnd-item={task.id}
   class="group relative rounded-2xl
     {isSelected ? 'outline outline-2 outline-[var(--color-accent)]' : ''}
-    {isDragging ? 'opacity-30' : 'animate-fade-up'}"
+    {isDragging ? 'opacity-30' : 'animate-fade-up'}
+    {menuOpen ? 'z-50' : ''}"
   style="animation-delay: {index * 50}ms"
   oncontextmenu={handleContextMenu}
 >
@@ -359,14 +360,14 @@
   <div use:portal>
     <button
       aria-label="Close menu"
-      class="fixed inset-0 z-40 cursor-default"
+      class="fixed inset-0 z-40 cursor-default bg-black/50 backdrop-blur-sm animate-fade-in"
       onpointerdown={(e) => e.stopPropagation()}
       onpointerup={(e) => e.stopPropagation()}
       onclick={() => (menuOpen = false)}
     ></button>
     <div
       bind:this={menuEl}
-      class="fixed z-50 w-48 py-1.5 rounded-2xl bg-[var(--color-surface-2)] no-touch-select
+      class="fixed z-[55] w-48 py-1.5 rounded-2xl bg-[var(--color-surface-2)] no-touch-select
         border border-[var(--color-border)] shadow-xl shadow-black/40 animate-fade-in"
       style="left: {menuX}px; top: {menuY}px;"
     >
