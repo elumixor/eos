@@ -309,6 +309,7 @@
 
   <div class="space-y-5">
     {#each SECTION_ORDER as key (key)}
+      {#if key !== "overdue" || buckets[key].length > 0}
       <BucketSection
         title={SECTION_TITLE[key]}
         listId={`bucket:${key}`}
@@ -322,6 +323,7 @@
         onBulkDelete={handleBulkDelete}
         onBulkComplete={handleBulkComplete}
       />
+      {/if}
     {/each}
   </div>
 </main>
